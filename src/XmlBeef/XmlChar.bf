@@ -538,9 +538,15 @@ internal static class XmlChar
 		while (i < end)
 		{
 			int newline = NewlineLength(input.Ptr, i, input.Length);
+			// An offset on the LF of a CRLF is still on the line the CRLF ends, after its CR (as
+			// XmlLineCounter and the document's line index count it)
+			if (i + newline > end)
+			{
+				column++;
+				break;
+			}
 			if (newline > 0)
 			{
-				// A CRLF split by the offset still counts once, at its CR
 				i += newline;
 				line++;
 				column = 1;

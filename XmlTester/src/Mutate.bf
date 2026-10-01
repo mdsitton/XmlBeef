@@ -194,10 +194,7 @@ static class Mutate
 			if (random.Next(2) == 0)
 				added.AddText("new");
 		case 5:
-			// Rename, but not an element whose attributes the internal subset may declare: their
-			// defaults and types (normalization) go with the old name
-			if (doc.HasInternalSubset && element.AttributeCount > 0)
-				return;
+			// What the old name's declarations gave the attributes (defaults, normalization) must stay
 			log.AppendF("rename {}\n", element.Name);
 			element.Rename(scope $"renamed{edit}");
 		case 6:

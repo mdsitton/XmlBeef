@@ -104,6 +104,13 @@ internal struct XmlLineCounter
 				continue;
 			}
 			int newline = XmlChar.NewlineLength(text, mPos, end);
+			// A CRLF across `offset` (an offset on its LF): its CR is not the newline, as in a word above;
+			// the LF is counted from there
+			if (mPos + newline > offset)
+			{
+				mPos = offset;
+				break;
+			}
 			if (newline > 0)
 			{
 				mPos += newline;

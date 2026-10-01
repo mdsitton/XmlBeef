@@ -71,8 +71,10 @@ extension XmlDocument
 		MarkChanged(mNodes[id].mParent);
 	}
 
-	/// An element's attributes from ATTLIST defaults become specified (written): its declarations no
-	/// longer apply to it (renamed), or are gone (the DOCTYPE removed), and the value must not be lost.
+	/// An element's declarations no longer apply to it (renamed), or are gone (the DOCTYPE removed), and
+	/// what they gave its attributes must not be lost: defaulted attributes become specified (written),
+	/// and in a PreserveStyle document values whose source text is not their value (normalized by an
+	/// attribute type such as NMTOKENS, or with references) are regenerated from the value.
 	internal void MaterializeDefaults(uint32 element)
 	{
 		ref XmlNodeRecord node = ref mNodes[element];
@@ -82,6 +84,12 @@ extension XmlDocument
 			if (mAttributes[i].mFlags.HasFlag(.Defaulted))
 			{
 				mAttributes[i].mFlags &= ~.Defaulted;
+				any = true;
+			}
+			else if (mPreserve && i < mAttributeStyles.Count && mAttributeStyles[i].mFlags.HasFlag(.Captured) &&
+				Source(mAttributeStyles[i].mValueStart, mAttributeStyles[i].mValueEnd) != mAttributes[i].mValue)
+			{
+				MarkAttribute(i, .ValueDirty);
 				any = true;
 			}
 		}
@@ -123,17 +131,6 @@ extension XmlDocument
 				// Produced by a reference: regenerated, not written as the reference
 				if (StyleFlags(id).HasFlag(.InEntity))
 					MarkNode(id, .TagDirty | .GroupDirty);
-				// Attribute values whose text is not their value: an entity reference, or normalization by an
-				// attribute type (NMTOKENS and the like), which the DTD did and no longer will
-				for (int i = node.mAttributeStart; i < node.mAttributeStart + node.mAttributeCount; i++)
-				{
-					if (i < mAttributeStyles.Count && mAttributeStyles[i].mFlags.HasFlag(.Captured) &&
-						Source(mAttributeStyles[i].mValueStart, mAttributeStyles[i].mValueEnd) != mAttributes[i].mValue)
-					{
-						MarkAttribute(i, .ValueDirty);
-						MarkNode(id, .TagDirty);
-					}
-				}
 			}
 			else if (mPreserve && node.mKind == .Text && StyleFlags(id).HasFlag(.Captured))
 			{

@@ -131,7 +131,9 @@ The line counter (`XmlLineCounter`) counts newlines only, every byte once (the b
 to the located elements, errors): two words at a time while neither has a byte below 0x0E (validated
 text has none there but tab, LF and CR), else every LF and lone CR of a word at once. A column is
 counted only when asked, from a base on the current line (its start, the drop point, or the last
-column asked for) that moves up with it. Review P02 and SP1: streaming cost 2–5× the in-memory event
+column asked for) that moves up with it. An offset on the LF of a CRLF is on the line the CRLF ends,
+after its CR, in every counter (the word and byte paths, `XmlChar.LineAndColumn`, the document's line
+index), whatever input follows. Review P02 and SP1: streaming cost 2–5× the in-memory event
 pass in instructions, now 1.1–1.3× (`bench/instructions.sh`'s `stream` and `stream4k` columns). A stream whose whole input fits in the first read is checked as memory input is,
 so both paths give identical first errors: the scripts' stream modes compare every not-wf case's
 message with the golden one.
@@ -394,7 +396,7 @@ more than they strictly must) rather than a dependency graph.
 
 | The document's meaning depends on | Changed by | What happens |
 |---|---|---|
-| ATTLIST defaults and types for an element name | `Rename` of the element | `MaterializeDefaults`: its defaulted attributes become specified |
+| ATTLIST defaults and types for an element name | `Rename` of the element | `MaterializeDefaults`: its defaulted attributes become specified; with PreserveStyle, values whose source is not their value (type normalization, references) are regenerated |
 | The whole internal subset (defaults, types, entities) | Removing the DOCTYPE | `DocTypeRemoved`: every element's defaults become specified; with PreserveStyle, text and elements an entity produced, attribute values whose source differs from their value, and references to empty entities (no node: only source between nodes) are regenerated or dropped |
 | Namespace declarations in scope | Moving a node, setting or removing an `xmlns` attribute, renaming | `ResolveNamespaces` under the changed element; `mNamespacesChanged`, checked by `CheckNamespaces` before `WriteBytes`/`WriteFile` |
 | Source shared with siblings (an entity reference) | Changing, removing, moving or inserting next to one of them | `GroupDirty`: the group is regenerated, expanding the reference |
@@ -460,10 +462,12 @@ cleanup but lets memory follow the edit history. `MemoryUsage` reports slots and
 bytes reserved, filled and live, and an approximate total. `Compact(newIds)` rebuilds the document
 from what is live: nodes renumbered in document order (handles become invalid, as after `Clear`;
 `newIds` maps old IDs to new), attributes contiguous, the side tables (positions, style, subset items)
-remapped, and the live text copied into a new arena of exactly its size; the kept source (PreserveStyle
+remapped (a removed DOCTYPE processing instruction keeps its place in the subset's text, naming the
+document node, so the writers still leave it out), and the live text copied into a new arena of exactly its size; the kept source (PreserveStyle
 and positions) moves as one block, so offsets and the views into it stay valid. Names stay interned.
 `Clear(true)` frees what `Clear()` keeps for the next read (arena chunks, table capacities, the name
-table's growth, the reader's buffers): after an unusually large document.
+table's growth, the DOCTYPE's tables, the errors, the reader's buffers): after an unusually large
+document. `MemoryUsage` counts all of them.
 
 `XmlTester -memory records.xml small.svg` (records.xml: 13.8 MB, 912,467 nodes), from the document's
 own accounting (resident memory is the allocator's business):
@@ -537,7 +541,8 @@ KdlBeef's `[KdlObject]` design (`plan.md` §4.12) with XML's roles.
   attribute of space-separated tokens (`class`, `points`). `List<scalar>` is repeated child elements
   named after the field; `[XmlObject]` fields are child elements named after the field;
   `List<[XmlObject]>` repeated children named after the item type; `[XmlArray]` puts a list in a
-  wrapper (`Item` names a scalar list's items, `item` by default). `[XmlChildren] List<T>` takes every
+  wrapper (`Item` names a scalar list's items, `item` by default), which is the type's child element in
+  the field's namespace while the items keep their own type's. `[XmlChildren] List<T>` takes every
   child element no other field claims, dispatched by local name to the concrete `[XmlObject]` types
   assignable to T (found through `Type.TypeDeclarations` when the method is compiled, so they may
   derive from the type being generated) and written through the interface so each item's own type
@@ -567,7 +572,10 @@ KdlBeef's `[KdlObject]` design (`plan.md` §4.12) with XML's roles.
   Writing a name in a namespace uses a prefix bound in scope, or declares one (`xmlns` on a new
   element, `xmlns:ns0` for an attribute); the reserved namespaces always use `xml` and `xmlns`. The
   names fields claim (for collisions, strict checks, `[XmlChildren]` and catch-all dictionaries) carry
-  their namespace (`local` or `{namespace}local`) and match by the same rules as reading.
+  their namespace (`local` or `{namespace}local`) and match by the same rules as reading. Since an
+  element name without a namespace matches that name in every namespace, two element claims collide
+  when their local names are equal and either has no namespace or both have the same one; attribute
+  claims collide only when equal (`href` and `{xlink}href` are two attributes).
 - **Runtime (`XmlBind`).** `Find*` locate a value as an `XmlValueRef` (element, attribute position,
   name, text); the first matching element wins. Names compare as interned IDs on the records, looked
   up once per call through the name table's recent-name cache (`FindCached`). `To*` convert with

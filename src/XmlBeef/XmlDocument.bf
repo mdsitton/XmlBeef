@@ -48,6 +48,7 @@ internal enum XmlNodeFlags : uint8
 /// A DOCTYPE processing instruction's place in the internal subset's text (offsets into it).
 internal struct XmlSubsetItem
 {
+	/// Its node; 0 (the document node, never in the subset) once compaction dropped a removed one.
 	public uint32 mId;
 	public int32 mStart;
 	public int32 mEnd;

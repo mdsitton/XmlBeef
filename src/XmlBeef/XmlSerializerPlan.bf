@@ -59,6 +59,9 @@ extension XmlSerializerCodeGen
 		public String mNamespace = new .() ~ delete _;
 		public List<String> mAliases = new .() ~ DeleteContainerAndItems!(_);
 		public String mWrapper = new .() ~ delete _;
+		/// The wrapper's namespace (a literal): the field's, as for any child element of the type; the
+		/// items may be in their own type's.
+		public String mWrapperNamespace = new .() ~ delete _;
 		public bool mRequired;
 		public Role mRole;
 		public Type mType;
@@ -209,6 +212,7 @@ extension XmlSerializerCodeGen
 				let wrapper = (array.Name != null) ? array.Name : xmlName;
 				CheckName(ownerName, field.Name, wrapper);
 				AppendLiteral(plan.mWrapper, wrapper);
+				AppendLiteral(plan.mWrapperNamespace, ns);
 			}
 			// Items of [XmlObject] types are in their own namespace when they have one
 			let itemNs = scope String(ns);
@@ -419,6 +423,15 @@ extension XmlSerializerCodeGen
 				{
 					if (used.TryGetValue(claim, let other))
 						FailType(ownerName, scope $"{isAttribute ? "the attribute" : "the element"} `{claim}` is mapped by both {other} and {fieldPath} (the name comes from [XmlName] or the field's name, or for a List of objects from the item type's element name)");
+					// An element name without a namespace matches that name in every namespace
+					if (!isAttribute)
+					{
+						for (let entry in elements)
+						{
+							if (entry.value != fieldPath && ElementClaimsOverlap(entry.key, claim))
+								FailType(ownerName, scope $"the elements `{entry.key}` ({entry.value}) and `{claim}` ({fieldPath}) overlap: a name without a namespace matches that name in every namespace, so both fields would read the same element. Give both a namespace, or different names");
+						}
+					}
 					used[new .(claim)] = new .(fieldPath);
 					if (isAttribute)
 					{
@@ -516,6 +529,30 @@ extension XmlSerializerCodeGen
 		if (!ns.IsEmpty)
 			claim.AppendF("{{{}}}", ns);
 		claim.Append(local);
+	}
+
+	/// Whether two element claims can match the same element (XmlBind.IsClaimedElement): the same local
+	/// name, and the same namespace or no namespace on either (which matches every one).
+	[Comptime]
+	static bool ElementClaimsOverlap(StringView a, StringView b)
+	{
+		SplitClaim(a, let nsA, let localA);
+		SplitClaim(b, let nsB, let localB);
+		return localA == localB && (nsA.IsEmpty || nsB.IsEmpty || nsA == nsB);
+	}
+
+	/// A claim's namespace (empty: none) and local name.
+	[Comptime]
+	static void SplitClaim(StringView claim, out StringView ns, out StringView local)
+	{
+		ns = default;
+		local = claim;
+		int close = claim.StartsWith('{') ? claim.IndexOf('}') : -1;
+		if (close > 0)
+		{
+			ns = claim.Substring(1, close - 1);
+			local = claim.Substring(close + 1);
+		}
 	}
 
 	/// How a field or list item of `type` is handled.

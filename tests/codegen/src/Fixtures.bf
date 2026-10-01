@@ -122,6 +122,16 @@ class Bad
 }
 #endif
 
+// FIXTURE OverlappingNamespaces: the elements `a` (Fixtures.Bad.any) and `{urn:specific}a` (Fixtures.Bad.specific) overlap
+#if FIXTURE_OverlappingNamespaces
+[XmlObject]
+class Bad
+{
+	[XmlElement, XmlName("a")] public String any;
+	[XmlElement, XmlName("a", Namespace = "urn:specific")] public String specific;
+}
+#endif
+
 // FIXTURE InheritedCollision: the attribute `id` is mapped by both Fixtures.Bad.other and Fixtures.Base.id
 #if FIXTURE_InheritedCollision
 [XmlObject]

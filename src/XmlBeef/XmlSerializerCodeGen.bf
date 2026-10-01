@@ -449,7 +449,7 @@ public static class XmlSerializerCodeGen
 		bool wrapped = !plan.mWrapper.IsEmpty;
 		code.Append("\t{\n\t\tXmlBeef.XmlNode _p = _node;\n");
 		if (wrapped)
-			code.AppendF("\t\tbool _found = Try!(XmlBeef.XmlBind.FindElement(_node, {}, {}, {}, out _p));\n", plan.mWrapper, plan.mNamespace, req);
+			code.AppendF("\t\tbool _found = Try!(XmlBeef.XmlBind.FindElement(_node, {}, {}, {}, out _p));\n", plan.mWrapper, plan.mWrapperNamespace, req);
 		else
 		{
 			code.AppendF("\t\tbool _found = XmlBeef.XmlBind.HasElement(_node, {}, {});\n", plan.mName, plan.mNamespace);
@@ -487,7 +487,7 @@ public static class XmlSerializerCodeGen
 		bool wrapped = !plan.mWrapper.IsEmpty;
 		code.Append("\t{\n");
 		if (wrapped)
-			code.AppendF("\t\tif (this.{0} == null)\n\t\t\tXmlBeef.XmlBind.RemoveElement(_node, {1}, {2});\n\t\telse\n\t\t{{\n\t\t\tlet _p = XmlBeef.XmlBind.ChildElement(_node, {1}, {2});\n", name, plan.mWrapper, plan.mNamespace);
+			code.AppendF("\t\tif (this.{0} == null)\n\t\t\tXmlBeef.XmlBind.RemoveElement(_node, {1}, {2});\n\t\telse\n\t\t{{\n\t\t\tlet _p = XmlBeef.XmlBind.ChildElement(_node, {1}, {2});\n", name, plan.mWrapper, plan.mWrapperNamespace);
 		else
 			code.Append("\t\t{\n\t\t\tlet _p = _node;\n");
 		code.AppendF("\t\t\tvar _cc = XmlBeef.XmlChildCursor(_p, {}, {});\n\t\t\tif (this.{} != null)\n\t\t\t{{\n\t\t\t\tfor (let _e in this.{})\n\t\t\t\t{{\n", plan.mName, plan.mNamespace, name, name);

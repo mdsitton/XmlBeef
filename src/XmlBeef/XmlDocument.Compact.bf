@@ -59,7 +59,9 @@ extension XmlDocument
 			usage.mTextLive = live;
 			usage.mTotalReserved = usage.mTextReserved + mNodes.ReservedBytes + mAttributes.ReservedBytes + mNames.ReservedBytes +
 				mNodeStyles.Capacity * strideof(XmlNodeStyle) + mAttributeStyles.Capacity * strideof(XmlAttributeStyle) +
-				(mNodeRanges.Capacity + mAttributeRanges.Capacity) * strideof(XmlRangeRecord) + mLineStarts.Capacity * sizeof(int32);
+				(mNodeRanges.Capacity + mAttributeRanges.Capacity) * strideof(XmlRangeRecord) + mLineStarts.Capacity * sizeof(int32) +
+				mSubsetItems.Capacity * strideof(XmlSubsetItem) + mErrors.Capacity * strideof(XmlParseError) + mNotations.Capacity * strideof(XmlNotation) +
+				(mNodeStack.Capacity + mPendingDocTypeNodes.Capacity) * sizeof(uint32) + mStyleEnds.Capacity * sizeof(int32) + mSourceName.AllocSize;
 			return usage;
 		}
 	}
@@ -131,15 +133,10 @@ extension XmlDocument
 				nodeRanges.Add(id < mNodeRanges.Count ? mNodeRanges[id] : default);
 		}
 
-		// The DOCTYPE's processing instructions that are still in it
-		for (int i = mSubsetItems.Count - 1; i >= 0; i--)
-		{
-			uint32 id = mSubsetItems[i].mId;
-			if (map[id] == 0)
-				mSubsetItems.RemoveAt(i);
-			else
-				mSubsetItems[i].mId = map[id];
-		}
+		// The places of the DOCTYPE's processing instructions in the subset's text: a removed one's stays,
+		// naming the document node (never in the subset), so the writers still leave its text out
+		for (int i < mSubsetItems.Count)
+			mSubsetItems[i].mId = map[mSubsetItems[i].mId];
 		mRoot = map[mRoot];
 		mDocType = map[mDocType];
 		mVersion = MoveText(mVersion, store, source);
@@ -204,7 +201,12 @@ extension XmlDocument
 		mAttributeRanges.Capacity = 0;
 		mLineStarts.Capacity = 0;
 		mNodeStack.Capacity = 0;
+		mPendingDocTypeNodes.Capacity = 0;
 		mStyleEnds.Capacity = 0;
+		mSubsetItems.Capacity = 0;
+		mErrors.Capacity = 0;
+		mNotations.Capacity = 0;
+		mSourceName.Clear();
 		DeleteAndNullify!(mReader);
 	}
 
