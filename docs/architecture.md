@@ -13,7 +13,7 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
   suite's **canonical form** (`XmlCanonical`).
 - **Strict.** Every well-formedness and namespace constraint is checked; the first error stops the
   read with a located `XmlParseError` (kind, message, line, column in code points, byte offset,
-  length, source name).
+  length, source name), or with collect-errors every error is reported and the read goes on (§3).
 - **Safe.** Nothing external is ever opened. The internal subset is read and applied; external
   entities and the external subset are reported, never fetched. Entity expansion is bounded by
   depth, total bytes and an amplification ratio, each a located `ResourceLimitExceeded`.
@@ -44,6 +44,7 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 | `XmlReaderCore.bf` | `XmlFailure`; `XmlReaderCore<TCursor>`: states and the step loop, prolog/epilog and content steps, entity input frames, expansion accounting, the window helpers, name scanning, `Fail` |
 | `XmlReaderCore.Tags.bf` | Start and end tags, attribute values (normalization, references), ATTLIST defaults and types, namespace binding and resolution, duplicate checks |
 | `XmlReaderCore.Text.bf` | Character data and references, comments, PIs, CDATA sections, the XML declaration |
+| `XmlReaderCore.Recovery.bf` | Collect-errors: `Recover` and its resynchronization helpers |
 | `XmlReaderCore.Dtd.bf` | DOCTYPE, the internal subset as a resumable state, ENTITY / ATTLIST / ELEMENT / NOTATION declarations, parameter-entity references |
 | `XmlDtd.bf` | `XmlStandalone`, `XmlNotation` (public); `XmlEntity`, `XmlAttributeDecl`, `XmlDtd` (internal) |
 | `XmlNameTable.bf` | `XmlNameId` (public); `XmlNameTable`: interning with stable text, cached QName split |
@@ -60,9 +61,11 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 Tests are in `src/XmlBeef/tests/` (`XmlEdgeCaseTests`: spec-reference §16 one test each;
 `XmlReaderTests`: API, encodings, DTD modes, locations, security and limits; `XmlDocumentTests`:
 the tree, lookups and the writer; `XmlEncodingTests`, `XmlStreamTests`, `XmlPositionsTests`,
-`XmlFastPathTests`, `XmlPreserveTests`, `XmlMutationTests`, `XmlObjectTests`). The CLI is `XmlTester/src/Program.bf`
-(with `Bench.bf` and `Mutate.bf`); the scripts are `test-roundtrip.sh` (PreserveStyle) and
-`test-xml-conformance.sh` (W3C suite in document, events, rewrite, stream and stream-events modes,
+`XmlFastPathTests`, `XmlPreserveTests`, `XmlMutationTests`, `XmlObjectTests`, `XmlCollectTests`). The CLI is `XmlTester/src/Program.bf`
+(with `Bench.bf`, `Mutate.bf` and `Fuzz.bf`); the scripts are `test-roundtrip.sh` (PreserveStyle),
+`test-collect.sh` (collect-errors under random damage) and
+`test-xml-conformance.sh` (W3C suite in document, events, rewrite, stream, stream-events, collect and
+stream-collect modes,
 with golden messages; catalogs read by `tests/xmlconf/manifest.py`), `test-svg-corpus.sh` (the SVG
 corpora, also streamed) and `test-leaks.sh`.
 
@@ -160,6 +163,39 @@ so events always balance. Errors are sticky (`Failed`); internal methods return
 measured choice). Messages name what was found and the rule broken (a character as `` `×` (U+00D7)
 ``), and every limit is a located `ResourceLimitExceeded` naming the setting; the suite's rejection
 messages are golden files (`tests/errors/`, `test-suites.md`).
+
+### Collect-errors
+
+With `XmlReadConfig.CollectErrors` an error does not stop the read: `NextEvent` returns it and calls
+`Recover` (`XmlReaderCore.Recovery.bf`, out of line in `AfterError`), which puts the reader where the
+next call can go on; recovery never fails and never makes an error itself (the pending one's message
+is in the per-thread buffer). It leaves every entity (reading goes on after the outermost reference;
+elements opened in one are then closed by the document's tags), then resynchronizes by where the error
+is, anchored at the error's offset (the reader's position may have moved on inside the broken
+construct by an amount that depends on a stream's buffer, so it is not used):
+
+- a start tag (`mTagStart`, tracked only in this mode, when it began in the document): past its `>`,
+  quoted values stepped over; unless it was `<a/>` its name becomes a phantom, whose end tag at that
+  depth is later consumed with no event and no error, so one broken tag is one error;
+- a mismatched end tag: if an open element has its name, the elements down to it are closed, one
+  EndElement per call (through the pending-end check, so the normal path pays nothing); otherwise it
+  is dropped;
+- a comment, a processing instruction or the XML declaration, a CDATA section (and `]]>` in text):
+  past `-->`, `?>`, `]]>`; a broken reference in text: past its `;`;
+- the internal subset: the next `<` or `]` (the subset stays in a stream's window, for the DocType
+  event); a broken or misplaced DOCTYPE: skipped whole; a second root element: skipped whole;
+- the end of the input: unclosed elements are reported once and closed one EndElement per call;
+  outside the root the read ends.
+
+An error at the same offset as the last one moves on a byte, so recovery always progresses. Encoding,
+I/O and resource-limit errors, an error before the input was set up, and `MaxErrors` (100) still stop
+the read. Text in the same run before an error in it is lost with it. `XmlDocument` keeps what it read,
+copies each error's message into its store (`Errors`) and returns the first. The suite runs in two
+more modes with it (`collect`, `stream-collect`: the first error must be the golden one), and
+`test-collect.sh` reads random mutations of every suite input and corpus SVG from memory and through a
+16-byte stream: both must finish and agree on the errors and the document, except where the encoding
+check rejects the input (validated whole from memory, buffer by buffer from a stream). The normal path
+pays about 1% in instructions (a check per start tag, code size).
 
 ### Names
 

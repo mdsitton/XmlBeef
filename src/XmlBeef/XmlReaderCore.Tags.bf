@@ -27,6 +27,12 @@ extension XmlReaderCore<TCursor>
 	Result<XmlEvent, XmlFailure> ReadStartTag()
 	{
 		int start = mPos;
+		// Collect-errors: for recovery from an error in the tag (cleared when it is reported)
+		if (mConfig.CollectErrors)
+		{
+			mTagStart = start;
+			mTagFrames = mFrames.Count;
+		}
 		int nameEnd = Try!(ScanAsciiName(start + 1, "an element name after `<`"));
 		XmlNameId name = mNames.InternCached(View(start + 1, nameEnd - start - 1));
 		int p = nameEnd;
@@ -151,6 +157,8 @@ extension XmlReaderCore<TCursor>
 		mNamespace = ns;
 		mIsEmpty = empty;
 		mPendingEnd = empty;
+		if (mConfig.CollectErrors)
+			mTagStart = -1;
 		Report(start, p, mElements.Count - 1);
 		return XmlEvent.StartElement;
 	}
@@ -165,6 +173,9 @@ extension XmlReaderCore<TCursor>
 		if (!StartsWith(p, name) || IsNameCharAt(p + name.Length))
 		{
 			int actualEnd = Try!(ScanName(p, "an element name after `</`"));
+			// Collect-errors: the end tag of a start tag that failed (and was skipped) goes quietly
+			if (mConfig.CollectErrors && DropPhantomEndTag(start, View(p, actualEnd - p)))
+				return cNoEvent;
 			return .Err(Fail(.MismatchedEndTag, scope $"The end tag `</{View(p, actualEnd - p)}>` does not match the start tag `<{name}>`", start, actualEnd - start));
 		}
 		if (open.mFrameLevel != mFrames.Count)

@@ -191,6 +191,7 @@ extension XmlReaderCore<TCursor>
 	}
 
 	/// Reads `&name` at `pos` and checks the `;` after it. @return The offset of the `;`.
+	[Inline]
 	Result<int, XmlFailure> ScanReferenceName(int pos)
 	{
 		int p = pos + 1;

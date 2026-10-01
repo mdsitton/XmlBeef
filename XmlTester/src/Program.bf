@@ -24,6 +24,13 @@ namespace XmlTester;
 ///   XmlTester [-no-ns] [-stream N] -roundtrip OUT [file]
 ///       read with PreserveStyle and write the document back to the file OUT (XmlDocument.WriteFile:
 ///       in its own encoding); test-roundtrip.sh compares OUT with the input byte for byte.
+///   XmlTester [-no-ns] -collect [options] [file]
+///       read with XmlReadConfig.CollectErrors: the first error on stderr's first line (the golden
+///       one), the others after it.
+///   XmlTester [-no-ns] -fuzz SEED ROUNDS [file]
+///       ROUNDS random byte mutations of the input, each read with CollectErrors from memory and from a
+///       16-byte stream (Fuzz.bf): both must finish, with the same errors and the same document. Exit 4
+///       if they differ.
 ///   XmlTester [-no-ns] -mutate SEED [file]
 ///       read with PreserveStyle, make random edits (Mutate.bf), write the document, and check that the
 ///       written text reads back into the edited document; print it. Exit 4 if it reads back
@@ -70,6 +77,9 @@ class Program
 		String path = null;
 		String roundtrip = null;
 		int mutateSeed = -1;
+		bool collect = false;
+		int fuzzSeed = -1;
+		int fuzzRounds = 0;
 		for (int i < args.Count)
 		{
 			let arg = args[i];
@@ -79,6 +89,14 @@ class Program
 			{
 				streamBuffer = size;
 				i++;
+			}
+			else if (arg == "-collect")
+				collect = true;
+			else if (arg == "-fuzz" && i + 2 < args.Count && int.Parse(args[i + 1]) case .Ok(let seed) && int.Parse(args[i + 2]) case .Ok(let rounds))
+			{
+				fuzzSeed = seed;
+				fuzzRounds = rounds;
+				i += 2;
 			}
 			else if (arg == "-events")
 				events = true;
@@ -118,6 +136,7 @@ class Program
 		config.StreamBufferBytes = streamBuffer;
 		if (roundtrip != null || mutateSeed >= 0)
 			config.MetadataMode = .PreserveStyle;
+		config.CollectErrors = collect;
 
 		// The input: whole in memory, or with -stream N a Stream read through an N-byte buffer
 		let bytes = scope List<uint8>();
@@ -149,6 +168,8 @@ class Program
 			return 2;
 		}
 		StringView input = .((char8*)bytes.Ptr, bytes.Count);
+		if (fuzzSeed >= 0)
+			return Fuzz.Run(bytes, config, fuzzSeed, fuzzRounds);
 
 		let output = scope String();
 		if (events)
@@ -170,6 +191,9 @@ class Program
 			if ((stream != null ? doc.Read(stream, config) : doc.Read(input, config)) case .Err(let error))
 			{
 				Console.Error.WriteLine(error.ToString(.. scope .()));
+				// With -collect, the rest after the first (the golden one)
+				for (int i = 1; i < doc.Errors.Length; i++)
+					Console.Error.WriteLine(doc.Errors[i].ToString(.. scope .()));
 				return 1;
 			}
 			if (roundtrip != null)

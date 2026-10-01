@@ -34,6 +34,15 @@ public struct XmlReadConfig
 {
 	/// @brief What the document records about the source (XmlDocument only).
 	public XmlMetadataMode MetadataMode = .None;
+	/// @brief Collect-errors: a well-formedness error does not stop the read. XmlReader.Next returns it,
+	/// and the next call goes on after it (a broken construct is skipped, a mismatched end tag closes
+	/// the elements down to the one it names, unclosed elements are closed at the end), so an editor or
+	/// linter gets every error and as much of the document as could be read. An XmlDocument keeps what
+	/// it read and lists the errors in `Errors`. Encoding, I/O and resource-limit errors still stop the
+	/// read, as does MaxErrors.
+	public bool CollectErrors = false;
+	/// @brief With CollectErrors: stop after this many errors. 0 = no limit.
+	public int MaxErrors = 100;
 	/// @brief Name of the input for error messages and source ranges, typically its file path. Only
 	/// read during the call; copies are kept.
 	public StringView SourceName = default;

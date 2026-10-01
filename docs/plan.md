@@ -446,7 +446,11 @@ Dictionaries map in five shapes chosen per field (`[XmlMap]`; the author's defau
 `<int32 name="k">v</int32>`).* The generator with §4.12's roles; a typed benchmark
 against quick-xml + serde, Go `encoding/xml` Unmarshal and .NET `XmlSerializer`.
 
-**Phase 7 — Collect-errors, then extras.** Collect-errors with recovery (required before the
+**Phase 7 — Collect-errors, then extras.** *Collect-errors done (2026-10-01): every error reported
+and the read goes on (resynchronizing per construct, mismatched end tags closing down to the element
+they name, phantom start tags absorbing their end tags), checked by the suite in two more modes and by
+`test-collect.sh`'s random damage from memory and streams (`architecture.md` §3). The extras remain,
+as needed.* Collect-errors with recovery (required before the
 library is integrated; earlier if convenient). Then, as needed: `ReadSubtree`, namespace-off mode
 (if not done in phase 1), the streaming writer, the external-entity resolver.
 

@@ -119,6 +119,27 @@ internal class XmlReaderCoreBase
 	/// only looks up the default namespace).
 	internal bool mNamespaceWork;
 
+	// Collect-errors (XmlReaderCore.Recovery.bf)
+	/// The errors reported so far.
+	internal int mErrorCount;
+	/// The start tag being read (-1: none), for skipping a broken one (with CollectErrors only).
+	internal int mTagStart = -1;
+	/// The entity depth the start tag began at (0: in the document, where mTagStart is a document offset).
+	internal int mTagFrames;
+	/// The DOCTYPE is being read (until its event).
+	internal bool mDocTypeOpen;
+	/// Start tags that failed, by name and the depth they were at: their end tags are dropped quietly.
+	internal List<(XmlNameId name, int depth)> mPhantoms ~ delete _;
+	/// After a mismatched end tag that names an open element: the elements above and including it are
+	/// closed, one EndElement per call, down to this many (-1: none), at the end tag's range.
+	internal int mCloseTo = -1;
+	internal int mCloseStart;
+	internal int mCloseEnd;
+	/// At the end of the input with elements open, after the error: they are closed one per call.
+	internal bool mClosingAtEnd;
+	/// The previous error's offset: an error there again moves recovery on by one byte.
+	internal int mLastErrorOffset = -1;
+
 	/// The names: the reader's own table, or a document's (which then owns them, and clears it).
 	internal XmlNameTable mOwnNames ~ delete _;
 	internal XmlNameTable mNames;
@@ -168,6 +189,7 @@ internal class XmlReaderCoreBase
 	{
 		mElements = new .();
 		mFrames = new .();
+		mPhantoms = new .();
 		mBindings = new .();
 		mOwnNames = new .();
 		mNames = mOwnNames;
@@ -206,6 +228,13 @@ internal class XmlReaderCoreBase
 		mBindings.Clear();
 		mBindingsToPop = -1;
 		mPendingEnd = false;
+		mErrorCount = 0;
+		mTagStart = -1;
+		mDocTypeOpen = false;
+		mPhantoms.Clear();
+		mCloseTo = -1;
+		mClosingAtEnd = false;
+		mLastErrorOffset = -1;
 		mNames = names ?? mOwnNames;
 		if (names == null)
 			mNames.Clear();
@@ -290,8 +319,19 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 			return .Err(.());
 		let result = ReadNext();
 		if (result case .Err)
-			mState = .Failed;
+			AfterError();
 		return result;
+	}
+
+	/// After an error: the reader stops, or with collect-errors the error is returned and the next call
+	/// goes on from where Recover puts it. Out of line, so NextEvent stays small where it is inlined.
+	[NoInline]
+	void AfterError()
+	{
+		if (mConfig.CollectErrors && CanRecover())
+			Recover();
+		else
+			mState = .Failed;
 	}
 
 	/// A step's result when it read something that reports no event (never returned by Next).
@@ -308,8 +348,16 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 		}
 		if (mPendingEnd)
 		{
+			if (mCloseTo < 0)
+			{
+				mPendingEnd = false;
+				return EndElement(mEventOffset, mEventEnd);
+			}
+			// Recovery: closing down to the element a mismatched end tag named (mPendingEnd stays set)
+			if (mElements.Count > mCloseTo)
+				return EndElement(mCloseStart, mCloseEnd);
+			mCloseTo = -1;
 			mPendingEnd = false;
-			return EndElement(mEventOffset, mEventEnd);
 		}
 		while (true)
 		{
@@ -458,6 +506,9 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 			}
 			if (mInputFailed)
 				return .Err(Fail(.IoError, "", p));
+			// Recovery: the unclosed elements were reported; close them
+			if (mClosingAtEnd)
+				return EndElement(p, p);
 			let open = mElements.Back;
 			return .Err(FailAt(.UnclosedElement, scope $"The element `{mNames[open.mName]}` is not closed", open.mStart, open.mLine, open.mColumn, 1 + mNames[open.mName].Length));
 		}

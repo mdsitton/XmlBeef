@@ -19,12 +19,13 @@
 # listed case that passes (remove it from the list). UPDATE_EXPECTED=1 rewrites the list's IDs from
 # the current failures (keeping known reasons) for review. Details go to test-xml-conformance.log.
 #
-# Every case runs in each of MODES (default "document events rewrite stream stream-events"): document
-# reads through an XmlDocument; events formats straight from XmlReader's events; rewrite writes the
-# document in canonical form, reads that back and checks its suite form (the writer must keep the
-# infoset; exit 3 if the rewrite is rejected); stream and stream-events read the file as a Stream through
-# a 16-byte buffer, so refills land inside names, references, CRLF pairs, multi-byte characters and
-# UTF-16 code units.
+# Every case runs in each of MODES (default "document events rewrite stream stream-events collect
+# stream-collect"): document reads through an XmlDocument; events formats straight from XmlReader's
+# events; rewrite writes the document in canonical form, reads that back and checks its suite form (the
+# writer must keep the infoset; exit 3 if the rewrite is rejected); stream and stream-events read the
+# file as a Stream through a 16-byte buffer, so refills land inside names, references, CRLF pairs,
+# multi-byte characters and UTF-16 code units; collect and stream-collect read with
+# XmlReadConfig.CollectErrors (the first error must still be the golden one, and recovery must finish).
 #
 # Fetch the suite first with tests/fetch-suites.sh. Needs python3 (tests/xmlconf/manifest.py reads the
 # catalogs until XmlBeef reads external entities itself).
@@ -79,12 +80,14 @@ fi
 
 failed=0
 declare -A failures
-for mode in ${MODES:-document events rewrite stream stream-events}; do
+for mode in ${MODES:-document events rewrite stream stream-events collect stream-collect}; do
 	flag=""
 	[ "$mode" = events ] && flag="-events"
 	[ "$mode" = rewrite ] && flag="-rewrite"
 	[ "$mode" = stream ] && flag="-stream 16"
 	[ "$mode" = stream-events ] && flag="-events -stream 16"
+	[ "$mode" = collect ] && flag="-collect"
+	[ "$mode" = stream-collect ] && flag="-collect -stream 16"
 
 	accept_pass=0; accept_total=0
 	reject_pass=0; reject_total=0

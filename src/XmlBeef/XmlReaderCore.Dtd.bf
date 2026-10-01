@@ -18,6 +18,7 @@ extension XmlReaderCore<TCursor>
 		mSeenDocType = true;
 		mDtd.mPresent = true;
 		mDocTypeStart = start;
+		mDocTypeOpen = true;
 		int p = Try!(RequireSpace(start + 9, "whitespace after `<!DOCTYPE`"));
 		int nameStart = p;
 		int nameEnd = Try!(ScanName(p, "the root element's name"));
@@ -61,6 +62,7 @@ extension XmlReaderCore<TCursor>
 			return .Err(Unexpected(pos, mSubsetStart < 0 ? "`[` or `>` in the DOCTYPE" : "`>` to end the DOCTYPE"));
 		mPos = pos + 1;
 		mState = .Prolog;
+		mDocTypeOpen = false;
 		// An undeclared entity in an ATTLIST default is an error only in some documents; now it is known
 		if (mDtd.mUndeclaredInDefault >= 0 && EntityDeclaredIsWfc)
 			return .Err(Fail(.UndeclaredEntity, "An attribute default refers to an entity that is not declared before it", mDtd.mUndeclaredInDefault, mDtd.mUndeclaredInDefaultLength));

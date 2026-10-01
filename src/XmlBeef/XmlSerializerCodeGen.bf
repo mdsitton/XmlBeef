@@ -1456,7 +1456,8 @@ public static class XmlSerializerCodeGen
 		code.AppendF("\t\t{{\n\t\t\tlet _mw = scope XmlBeef.XmlMapWriter(_dn, {}, {}, {}, {}, {}, {});\n", style, plan.mMapEntry, plan.mMapKey, plan.mMapValue, plan.mNamespace, claimed);
 		code.AppendF("\t\t\tif (this.{0} != null)\n\t\t\t{{\n\t\t\t\tfor (let _kv in this.{0})\n\t\t\t\t{{\n\t\t\t\t\tlet _k = scope String();\n\t\t\t\t\t{{\n\t\t\t\t\t\tlet _t = _k;\n\t\t\t\t\t\tbool _has = true;\n", name);
 		EmitFormat(code, "\t\t\t\t\t\t", "_kv.key", plan.mKeyType, plan.mKeyKind, null, naming);
-		code.Append("\t\t\t\t\t}\n");
+		// A null key has no text: its entry is left out
+		code.Append("\t\t\t\t\t\tif (!_has)\n\t\t\t\t\t\t\tcontinue;\n\t\t\t\t\t}\n");
 		StringView entryType = (plan.mMapStyle == .TypedEntries) ? plan.mEntryType : "\"\"";
 		if (!objectValue)
 		{

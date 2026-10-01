@@ -149,6 +149,8 @@ public class XmlDocument
 	/// document offset where that text starts: the writers rebuild the subset around them.
 	internal List<XmlSubsetItem> mSubsetItems ~ delete _;
 	internal int32 mSubsetOffset;
+	/// The errors of the last read with XmlReadConfig.CollectErrors (their text in the store).
+	List<XmlParseError> mErrors ~ delete _;
 	internal List<XmlNotation> mNotations ~ delete _;
 	/// Read with namespace processing.
 	internal bool mNamespaces;
@@ -215,6 +217,7 @@ public class XmlDocument
 		mStyleEnds = new .();
 		mLineStarts = new .();
 		mSubsetItems = new .();
+		mErrors = new .();
 		mGeneration = 1;
 		mNamespaces = true;
 		XmlNodeRecord document = default;
@@ -259,6 +262,10 @@ public class XmlDocument
 	public bool HasInternalSubset => mHasInternalSubset;
 	/// @brief The notations declared in the internal subset, in declaration order.
 	public Span<XmlNotation> Notations => mNotations;
+	/// @brief The errors of the last read with XmlReadConfig.CollectErrors, in order (empty otherwise, or
+	/// when it read without error). Read returns the first. Their text belongs to the document (valid
+	/// until it is cleared or read again; XmlParseError.Detach copies one).
+	public Span<XmlParseError> Errors => mErrors;
 	/// @brief The name of the source last read (XmlReadConfig.SourceName, or ReadFile's path); empty if
 	/// unnamed.
 	public StringView SourceName => mSourceName;
@@ -290,6 +297,7 @@ public class XmlDocument
 		mHasInternalSubset = false;
 		mSubsetItems.Clear();
 		mSubsetOffset = 0;
+		mErrors.Clear();
 		mNamespaces = true;
 		mInputStart = null;
 		mInputEnd = null;
@@ -398,7 +406,8 @@ public class XmlDocument
 	{
 		// Nothing may keep viewing the caller's input or stream
 		mReader.Reset(StringView());
-		if (result case .Err)
+		// Collect-errors keeps what was read
+		if (result case .Err && mErrors.IsEmpty)
 		{
 			let sourceName = scope String(mSourceName);
 			Clear();
@@ -529,7 +538,22 @@ public class XmlDocument
 		uint32 current = 0;
 		while (true)
 		{
-			let event = Try!(reader.Next());
+			let next = reader.Next();
+			if (next case .Err(let error))
+			{
+				if (!config.CollectErrors)
+					return .Err(error);
+				// Collect-errors: kept (its text copied into the store), and the reader goes on unless it
+				// stopped
+				var kept = error;
+				kept.mMessage = mStore.NewText(error.mMessage);
+				kept.mSource = mSourceName;
+				mErrors.Add(kept);
+				if (reader.IsStopped)
+					return .Err(mErrors[0]);
+				continue;
+			}
+			let event = next.Get();
 			int nodesBefore = mNodes.Count;
 			// The event's fields, read straight from the core (it changes only on Reset)
 			XmlReaderCoreBase core = reader.Core;
@@ -649,6 +673,8 @@ public class XmlDocument
 					CaptureBegin(reader);
 					mTailStart = mLastEnd;
 				}
+				if (!mErrors.IsEmpty)
+					return .Err(mErrors[0]);
 				return .Ok;
 			}
 			// Text, CDATA, comments, PIs, references, the DOCTYPE: the event's range
