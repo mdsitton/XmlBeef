@@ -20,6 +20,8 @@ extension XmlNode
 	{
 		CheckContainer();
 		mDocument.CheckName(name, "element");
+		if (mDocument.mNodes[mId].mKind == .DocType)
+			Runtime.FatalError("XmlBeef: the DOCTYPE holds only comments and processing instructions");
 		if (mId == 0 && mDocument.mRoot != 0)
 			Runtime.FatalError("XmlBeef: the document has a root element already");
 		uint32 id = NewElement(name);
@@ -138,6 +140,7 @@ extension XmlNode
 		else
 			Runtime.FatalError("XmlNode.Rename: only an element or a processing instruction can be renamed");
 		node.mName = mDocument.mNames.Intern(name);
+		node.mFlags |= .Edited;
 		if (node.mKind == .Element && mDocument.mNamespaces)
 			node.mNamespace = mDocument.LookupNamespace(mId, mDocument.mNames.PrefixOf(node.mName));
 		mDocument.MarkNode(mId, .NameDirty);
@@ -154,6 +157,7 @@ extension XmlNode
 			Runtime.FatalError("XmlNode.SetValue: only text, CDATA, comments and processing instructions have a value to set");
 		CheckValue(node.mKind, value);
 		node.mValue = mDocument.mStore.NewText(value);
+		node.mFlags |= .Edited;
 		mDocument.MarkNode(mId, .ValueDirty);
 	}
 
@@ -246,7 +250,8 @@ extension XmlNode
 	XmlNode AddValue(XmlNodeKind kind, StringView target, StringView value)
 	{
 		CheckContainer();
-		if (mId == 0 && (kind == .Text || kind == .CData))
+		bool outside = mId == 0 || mDocument.mNodes[mId].mKind == .DocType;
+		if (outside && (kind == .Text || kind == .CData))
 			Runtime.FatalError("XmlBeef: text and CDATA sections cannot be outside the root element");
 		if (kind == .ProcessingInstruction)
 			CheckTarget(target);
@@ -350,24 +355,32 @@ extension XmlNode
 			Runtime.FatalError("XmlBeef: a processing instruction's data cannot contain `?>`");
 	}
 
-	/// A node that can have children added: an element or the document node.
+	/// A node that can have children added: an element, the document node, or the DOCTYPE (comments and
+	/// processing instructions, written into its internal subset).
 	void CheckContainer()
 	{
 		if (!IsValid && !(mDocument != null && mId == 0))
 			Runtime.FatalError("XmlNode: the handle is invalid (no node, a removed node, or a cleared document)");
 		let kind = mDocument.mNodes[mId].mKind;
-		if (kind != .Element && kind != .Document)
-			Runtime.FatalError("XmlNode: only an element or the document node can have children added");
+		if (kind != .Element && kind != .Document && kind != .DocType)
+			Runtime.FatalError("XmlNode: only an element, the document node or the DOCTYPE can have children added");
 	}
 
-	/// A node in the tree: valid, and not the document node.
+	/// A node in the tree that can be changed: valid, not the document node, and not a DOCTYPE processing
+	/// instruction read from a parameter entity (the entity's reference would still write it).
 	void CheckChild()
 	{
 		if (!IsValid)
 			Runtime.FatalError("XmlNode: the handle is invalid (no node, a removed node, or a cleared document)");
 		if (mId == 0)
 			Runtime.FatalError("XmlNode: the document node has no place, name or value to change");
+		if (mDocument.mNodes[mId].mFlags.HasFlag(.FromEntity))
+			Runtime.FatalError("XmlNode: this processing instruction comes from a parameter entity in the DOCTYPE, which writes it: change the entity's declaration instead");
 	}
+
+	/// @brief Whether the node can be changed, moved or removed: false for the document node and for a
+	/// DOCTYPE processing instruction read from a parameter entity (its entity writes it).
+	public bool IsEditable => IsValid && mId != 0 && !mDocument.mNodes[mId].mFlags.HasFlag(.FromEntity);
 
 	void CheckElement()
 	{

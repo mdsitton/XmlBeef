@@ -35,7 +35,22 @@ internal enum XmlNodeFlags : uint8
 	/// Removed from the document; its slot is not reused until the document is cleared.
 	Removed = 1,
 	/// An element written as an empty-element tag (`<a/>`).
-	EmptyTag = 2
+	EmptyTag = 2,
+	/// Its name or value was changed (a DOCTYPE processing instruction is then regenerated).
+	Edited = 4,
+	/// A DOCTYPE processing instruction read from a parameter entity: the entity writes it, so it
+	/// cannot be changed.
+	FromEntity = 8,
+	/// A DOCTYPE processing instruction whose place in the internal subset's text is recorded.
+	InSubsetText = 16
+}
+
+/// A DOCTYPE processing instruction's place in the internal subset's text (offsets into it).
+internal struct XmlSubsetItem
+{
+	public uint32 mId;
+	public int32 mStart;
+	public int32 mEnd;
 }
 
 /// A node's slot in the document's node table. Links are node IDs; 0 means none; record 0 is the
@@ -130,6 +145,10 @@ public class XmlDocument
 	internal bool mHasSystemId;
 	internal StringView mInternalSubset;
 	internal bool mHasInternalSubset;
+	/// The DOCTYPE's processing instructions in the internal subset's text, in order, and the
+	/// document offset where that text starts: the writers rebuild the subset around them.
+	internal List<XmlSubsetItem> mSubsetItems ~ delete _;
+	internal int32 mSubsetOffset;
 	internal List<XmlNotation> mNotations ~ delete _;
 	/// Read with namespace processing.
 	internal bool mNamespaces;
@@ -195,6 +214,7 @@ public class XmlDocument
 		mAttributeStyles = new .();
 		mStyleEnds = new .();
 		mLineStarts = new .();
+		mSubsetItems = new .();
 		mGeneration = 1;
 		mNamespaces = true;
 		XmlNodeRecord document = default;
@@ -268,6 +288,8 @@ public class XmlDocument
 		mHasSystemId = false;
 		mInternalSubset = default;
 		mHasInternalSubset = false;
+		mSubsetItems.Clear();
+		mSubsetOffset = 0;
 		mNamespaces = true;
 		mInputStart = null;
 		mInputEnd = null;
@@ -571,9 +593,20 @@ public class XmlDocument
 				uint32 id = NewNode(.ProcessingInstruction);
 				mNodes[id].mName = mNames.Intern(reader.Name);
 				mNodes[id].mValue = Own(reader.Value);
-				// The internal subset's are the DOCTYPE's children, linked when it is reported
+				// The internal subset's are the DOCTYPE's children, linked when it is reported, with their
+				// place in the subset's text (one from a parameter entity has the reference's)
 				if (reader.IsInDocType)
+				{
 					mPendingDocTypeNodes.Add(id);
+					if (reader.IsInEntity)
+						mNodes[id].mFlags |= .FromEntity;
+					else
+					{
+						mNodes[id].mFlags |= .InSubsetText;
+						int subset = reader.SubsetStart;
+						mSubsetItems.Add(.() { mId = id, mStart = (int32)(reader.Offset - subset), mEnd = (int32)(reader.EndOffset - subset) });
+					}
+				}
 				else
 					LinkLastChild(current, id);
 			case .EntityReference:
@@ -600,6 +633,7 @@ public class XmlDocument
 				mHasSystemId = reader.HasSystemId;
 				mInternalSubset = mStore.NewText(reader.InternalSubset);
 				mHasInternalSubset = reader.HasInternalSubset;
+				mSubsetOffset = (int32)reader.SubsetStart;
 				for (var notation in reader.Notations)
 				{
 					notation.mName = mStore.NewText(notation.mName);

@@ -308,13 +308,62 @@ extension XmlDocument
 			output.Append(" SYSTEM ");
 			AppendQuoted(output, mSystemId);
 		}
-		if (mHasInternalSubset)
+		if (mHasInternalSubset || mNodes[mDocType].mFirstChild != 0)
 		{
 			output.Append(" [");
-			output.Append(mInternalSubset);
+			AppendInternalSubset(output, mInternalSubset);
 			output.Append(']');
 		}
 		output.Append('>');
+	}
+
+	/// The internal subset `subset` (its text as read) with the DOCTYPE's current children: each
+	/// processing instruction read from it kept as written, regenerated where it was if changed, dropped
+	/// (with its line) if removed or moved away; comments and processing instructions added to the
+	/// DOCTYPE appended at the end.
+	internal void AppendInternalSubset(String output, StringView subset)
+	{
+		int pos = 0;
+		for (let item in mSubsetItems)
+		{
+			output.Append(subset.Substring(pos, item.mStart - pos));
+			ref XmlNodeRecord node = ref mNodes[item.mId];
+			pos = item.mEnd;
+			if (!node.mFlags.HasFlag(.Removed) && mDocType != 0 && node.mParent == mDocType)
+			{
+				if (node.mFlags.HasFlag(.Edited))
+					WriteLeaf(node, output);
+				else
+					output.Append(subset.Substring(item.mStart, item.mEnd - item.mStart));
+				continue;
+			}
+			// Gone: alone on its line, the line goes with it
+			int newline = (pos < subset.Length) ? XmlChar.NewlineLength(subset.Ptr, pos, subset.Length) : 0;
+			int indent = output.Length;
+			while (indent > 0 && (output[indent - 1] == ' ' || output[indent - 1] == '\t'))
+				indent--;
+			if (newline > 0 && (indent == 0 || output[indent - 1] == '\n'))
+			{
+				output.Length = indent;
+				pos += newline;
+			}
+		}
+		output.Append(subset.Substring(pos));
+		if (mDocType == 0)
+			return;
+		// Added ones, at the end (on lines of their own when the subset is laid out in lines)
+		bool lines = subset.Contains('\n');
+		for (uint32 id = mNodes[mDocType].mFirstChild; id != 0; id = mNodes[id].mNextSibling)
+		{
+			ref XmlNodeRecord node = ref mNodes[id];
+			if (node.mFlags.HasFlag(.InSubsetText) || node.mFlags.HasFlag(.FromEntity))
+				continue;
+			if (lines && !output.EndsWith('\n'))
+				output.Append('\n');
+			WriteLeaf(node, output);
+			if (lines)
+				output.Append('\n');
+		}
 	}
 
 	/// A system literal in double quotes, or single ones when it contains a double quote.

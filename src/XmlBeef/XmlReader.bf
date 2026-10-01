@@ -233,6 +233,8 @@ public class XmlReader
 	internal XmlReaderCoreBase Core => mCore;
 	/// Whether the event was read from an entity's replacement text (its range is the reference's).
 	internal bool IsInEntity => mCore.mFrames.Count > 0;
+	/// The document offset where the internal subset's text starts (after `[`), -1 without one.
+	internal int SubsetStart => mCore.mSubsetStart;
 	/// The offset of the first content byte, after a UTF-8 byte order mark (after the first Next).
 	internal int ContentStart => mCore.mContentStart;
 	/// In-memory input: the UTF-8 text the offsets index (the input, or its transcoding).

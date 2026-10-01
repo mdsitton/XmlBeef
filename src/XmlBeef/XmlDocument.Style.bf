@@ -341,10 +341,36 @@ extension XmlDocument
 		case .Element:
 			WriteElementTree(id, default, output);
 		case .DocType:
-			WriteDocType(output);
+			if (StyleFlags(id).HasFlag(.Captured))
+				WriteDocTypePreserving(id, output);
+			else
+				WriteDocType(output);
 		default:
 			WriteLeaf(node, output);
 		}
+	}
+
+	/// A DOCTYPE whose processing instructions changed: its text as read, with the internal subset
+	/// rebuilt (AppendInternalSubset), or one added before the `>` when it had none.
+	void WriteDocTypePreserving(uint32 id, String output)
+	{
+		let style = mNodeStyles[id];
+		if (mHasInternalSubset)
+		{
+			int subsetEnd = mSubsetOffset + mInternalSubset.Length;
+			output.Append(Source(style.mStart, mSubsetOffset));
+			AppendInternalSubset(output, Source(mSubsetOffset, subsetEnd));
+			output.Append(Source(subsetEnd, style.mEnd));
+			return;
+		}
+		output.Append(Source(style.mStart, style.mEnd - 1));
+		if (mNodes[id].mFirstChild != 0)
+		{
+			output.Append(" [");
+			AppendInternalSubset(output, default);
+			output.Append(']');
+		}
+		output.Append('>');
 	}
 
 	/// Siblings that came from one entity reference (with text around it): the reference as written

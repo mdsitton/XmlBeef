@@ -300,7 +300,16 @@ an element's namespace is resolved from the `xmlns` attributes in scope when it 
 moved, and setting or removing a declaration resolves the subtree under it again. What could not be
 written as well-formed XML (an invalid name or character, `--` in a comment, `?>` in PI data, a
 target `xml`) is a fatal error, as an invalid handle is; `XmlDocument.IsValidName` and `IsValidText`
-check first. Prefixes need only be declared by the time the document is written. An element's
+check first. Prefixes need only be declared by the time the document is written.
+
+The DOCTYPE's children are the internal subset's processing instructions, whose places in the
+subset's text are recorded while reading (`mSubsetItems`). Both writers rebuild the subset around
+them (`AppendInternalSubset`): one unchanged is kept as written, one changed (`Edited`) regenerated in
+its place, one removed or moved away dropped with its line, and comments and processing instructions
+added to the DOCTYPE appended before `]` (an internal subset is added to a DOCTYPE without one). A
+PreserveStyle DOCTYPE keeps its own text around the subset. A processing instruction a parameter
+entity wrote (`FromEntity`) cannot be changed, since the reference would write it again:
+`XmlNode.IsEditable` tells, and changing one is a fatal error. An element's
 attributes grow in place when they are the last in the table, else move to its end (the old range is
 a hole until Clear); the side tables (positions, style) move with them.
 

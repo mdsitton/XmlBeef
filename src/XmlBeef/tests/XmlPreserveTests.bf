@@ -188,6 +188,34 @@ static class XmlPreserveTests
 		Test.Assert(StringView((char8*)bytes.Ptr, bytes.Count) == "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<a>При</a>\n");
 	}
 
+	[Test]
+	public static void DocType_ProcessingInstructionsEdited()
+	{
+		let input = "<!DOCTYPE r SYSTEM 'r.dtd' [\n  <!ENTITY e 'x'>\n  <?keep one?>\n  <?edit two?>\n  <?drop three?>\n]>\n<r>&e;</r>";
+		let doc = ReadPreserved(scope .(), input);
+		let docType = doc.DocType;
+		Test.Assert(docType.ChildCount == 3);
+		docType.FirstChild.NextSibling.SetValue("2");
+		docType.LastChild.Remove();
+		docType.AddComment(" new ");
+		docType.AddProcessingInstruction("added", "4");
+		// The DOCTYPE as written, its subset rebuilt: kept, changed in place, removed with its line, added
+		AssertWritten(doc, "<!DOCTYPE r SYSTEM 'r.dtd' [\n  <!ENTITY e 'x'>\n  <?keep one?>\n  <?edit 2?>\n<!-- new -->\n<?added 4?>\n]>\n<r>&e;</r>");
+		// The canonical writer rebuilds it the same way
+		let canonical = doc.WriteCanonical(.. scope String());
+		Test.Assert(canonical == "<!DOCTYPE r SYSTEM \"r.dtd\" [\n  <!ENTITY e 'x'>\n  <?keep one?>\n  <?edit 2?>\n<!-- new -->\n<?added 4?>\n]>\n<r>x</r>\n");
+
+		// A DOCTYPE without a subset gets one
+		let plain = ReadPreserved(scope .(), "<!DOCTYPE r>\n<r/>");
+		plain.DocType.AddProcessingInstruction("p", "d");
+		AssertWritten(plain, "<!DOCTYPE r [<?p d?>]>\n<r/>");
+
+		// One from a parameter entity: its entity writes it, so it cannot be changed
+		let fromEntity = ReadPreserved(scope .(), "<!DOCTYPE r [<!ENTITY % pe '<?pi inner?>'> %pe;]><r/>");
+		Test.Assert(fromEntity.DocType.ChildCount == 1 && !fromEntity.DocType.FirstChild.IsEditable);
+		Test.Assert(fromEntity.DocType.FirstChild.Value == "inner");
+	}
+
 	static StringView Bytes(List<uint8> bytes) => .((char8*)bytes.Ptr, bytes.Count);
 
 	[Test]

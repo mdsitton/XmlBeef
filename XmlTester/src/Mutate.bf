@@ -95,8 +95,35 @@ static class Mutate
 			return;
 		let element = elements[random.Next(elements.Count)];
 		let node = nodes[random.Next(nodes.Count)];
-		switch (random.Next(8))
+		switch (random.Next(9))
 		{
+		case 8:
+			// The DOCTYPE's processing instructions (not those its parameter entities write)
+			let docType = doc.DocType;
+			if (!docType.IsValid)
+				return;
+			let editable = scope List<XmlNode>();
+			for (let child in docType.Children)
+			{
+				if (child.IsEditable)
+					editable.Add(child);
+			}
+			int choice = random.Next(3);
+			if (editable.IsEmpty || choice == 0)
+			{
+				log.Append("add a processing instruction to the DOCTYPE\n");
+				docType.AddProcessingInstruction("added", scope $"pi {edit}");
+			}
+			else if (choice == 1)
+			{
+				log.Append("change a DOCTYPE processing instruction\n");
+				editable[random.Next(editable.Count)].SetValue(scope $"changed {edit}");
+			}
+			else
+			{
+				log.Append("remove a DOCTYPE processing instruction\n");
+				editable[random.Next(editable.Count)].Remove();
+			}
 		case 0:
 			// Change an attribute, or add one
 			let attributes = scope List<XmlAttribute>();
