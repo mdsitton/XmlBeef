@@ -18,12 +18,39 @@ namespace XmlTester;
 ///       scripts and is the default output.
 ///   XmlTester [-no-ns] -write [-indent N] [file]
 ///       print the document in canonical form (XmlDocument.Write), indented by N spaces if given.
+///   XmlTester -bench <document|events> <file-or-dir> <min-samples>
+///       the bench/compare harness (Bench.bf): the check line, then the median time of a read
+///   XmlTester -bench-loop <document|events> <file-or-dir> <iterations>
+///       the same operation a fixed number of times, for perf stat and perf record
 ///   Exit status: 0 well-formed, 1 not well-formed, 2 usage or I/O error, 3 the rewritten document
 ///   was rejected.
 class Program
 {
 	public static int Main(String[] args)
 	{
+		if (args.Count > 0 && (args[0] == "-bench" || args[0] == "-bench-loop"))
+		{
+			int count = 0;
+			if (args.Count >= 4 && int.Parse(args[3]) case .Ok(let parsed))
+				count = parsed;
+			if (count < 1)
+			{
+				Console.Error.WriteLine($"usage: XmlTester {args[0]} <document|events> <file-or-dir> <min-samples|iterations>");
+				return 2;
+			}
+			if (args[0] == "-bench")
+				return Bench.Run(args[1], args[2], count);
+			// Config variations, to measure what each costs: no-ns, no-dtd
+			var config = XmlReadConfig();
+			for (int i = 4; i < args.Count; i++)
+			{
+				if (args[i] == "no-ns")
+					config.Namespaces = false;
+				else if (args[i] == "no-dtd")
+					config.DtdMode = .Ignore;
+			}
+			return Bench.Loop(args[1], args[2], count, config);
+		}
 		bool namespaces = true;
 		bool events = false;
 		bool rewrite = false;

@@ -267,8 +267,9 @@ public class XmlReader
 	/// @return Whether the element has the attribute.
 	public bool TryGetAttribute(StringView name, out StringView value)
 	{
-		for (let attribute in mBytes.mAttributes)
+		for (int i < mBytes.mAttributes.Count)
 		{
+			let attribute = mBytes.mAttributes[i];
 			if (mBytes.mNames[attribute.mName] == name)
 			{
 				value = attribute.mValue;
@@ -286,8 +287,9 @@ public class XmlReader
 	/// @return Whether the element has the attribute.
 	public bool TryGetAttribute(StringView namespaceUri, StringView localName, out StringView value)
 	{
-		for (let attribute in mBytes.mAttributes)
+		for (int i < mBytes.mAttributes.Count)
 		{
+			let attribute = mBytes.mAttributes[i];
 			XmlNameId local = attribute.mLocal.IsValid ? attribute.mLocal : attribute.mName;
 			if (mBytes.mNames[local] == localName && mBytes.mNames[attribute.mNamespace] == namespaceUri)
 			{

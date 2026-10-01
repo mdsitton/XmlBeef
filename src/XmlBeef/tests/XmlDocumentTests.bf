@@ -227,6 +227,18 @@ static class XmlDocumentTests
 	}
 
 	[Test]
+	public static void Tables_FullThenEmptyElement()
+	{
+		// The attribute table exactly full (its first capacity is 16), then an element with none
+		let input = scope String("<r");
+		for (int i < 16)
+			input.AppendF(" a{}=\"{}\"", i, i);
+		input.Append("><e/><f g=\"1\"/></r>");
+		let doc = Parse(scope XmlDocument(), input);
+		Test.Assert(doc.Root.AttributeCount == 16 && doc.Root.Find("e").AttributeCount == 0 && doc.Root.Find("f").GetInt32("g") == 1);
+	}
+
+	[Test]
 	public static void Names_AreShared()
 	{
 		// The reader interns into the document's table: equal names have equal IDs

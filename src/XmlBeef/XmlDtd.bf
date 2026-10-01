@@ -104,7 +104,7 @@ internal class XmlDtd
 	/// Attribute declarations by element name.
 	public Dictionary<XmlNameId, List<XmlAttributeDecl>> mAttributes ~ DeleteDictionaryAndValues!(_);
 	public List<XmlNotation> mNotations ~ delete _;
-	BumpAllocator mText ~ delete _;
+	XmlTextArena mText ~ delete _;
 
 	/// A DOCTYPE was read.
 	public bool mPresent;
@@ -126,11 +126,14 @@ internal class XmlDtd
 		mParameter = new .();
 		mAttributes = new .();
 		mNotations = new .();
-		mText = new BumpAllocator(.Ignore);
+		mText = new XmlTextArena(1024);
 	}
 
 	public void Clear()
 	{
+		// Everything here comes from a DOCTYPE
+		if (!mPresent)
+			return;
 		for (let entity in mGeneral.Values)
 			delete entity;
 		mGeneral.Clear();
@@ -141,8 +144,7 @@ internal class XmlDtd
 			delete list;
 		mAttributes.Clear();
 		mNotations.Clear();
-		delete mText;
-		mText = new BumpAllocator(.Ignore);
+		mText.Reset();
 		mPresent = false;
 		mHasExternalSubset = false;
 		mHasParameterReferences = false;
@@ -154,11 +156,7 @@ internal class XmlDtd
 	/// A copy of `text` owned by the DTD.
 	public StringView Own(StringView text)
 	{
-		if (text.IsEmpty)
-			return "";
-		let bytes = (char8*)mText.Alloc(text.Length, 1);
-		Internal.MemCpy(bytes, text.Ptr, text.Length);
-		return .(bytes, text.Length);
+		return mText.Copy(text);
 	}
 
 	/// The attribute declarations of an element type, or null.

@@ -409,7 +409,12 @@ name table; DOCTYPE processing instructions are the DOCTYPE node's children.* St
 over reader events, canonical writer, lookups; `XmlTester` reads through the document (events kept as
 a second mode, both checked by the script); `test-svg-corpus.sh` over the 2,389 SVGs.
 
-**Phase 3 — Speed.** Join `bench/compare` (a `beef` harness and `XmlTester -bench`), profile, fast
+**Phase 3 — Speed.** *Code done, timed run pending (2026-09-30): `XmlTester -bench` joins
+`bench/compare/run.sh` (`XmlBeef`, `XmlBeef reader`; check lines equal libxml2's on all eight inputs)
+and the fast paths of `architecture.md` §3 cut instructions per byte by 30–75% (`status.md`). The
+machine never dropped below load average 2, so no timed figure exists; orientation runs under load
+put both columns past the working targets. Run the timed benchmark (status.md P3T) before calling the
+phase done.* Join `bench/compare` (a `beef` harness and `XmlTester -bench`), profile, fast
 paths. Numeric targets come from the timed run (§2.2); the working targets: the event reader in
 quick-xml's class, the document at or above roxmltree (the fastest correct DOM), several times
 libxml2 and expat, all while passing every benchmark input and the W3C suite (pugixml is faster but

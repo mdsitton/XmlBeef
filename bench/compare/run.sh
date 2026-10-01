@@ -19,6 +19,8 @@
 # library does not read UTF-16 (the harness exits 3).
 #
 # Setup: ./fetch.sh && ./build.sh && ./gen-inputs.py
+# XmlBeef's columns need the Release XmlTester: beefbuild -config=Release at the repository root.
+# ONLY='XmlBeef.*' ./run.sh remeasures just those columns.
 # Usage: run.sh [min-samples] [input names...]
 # A full run prints the tables (save them as results.md and run plot.py to redraw the charts). With
 # ONLY (merge.sh), for example ONLY='expat|pugixml.*' ./run.sh, only the matching implementations are
@@ -60,8 +62,12 @@ input_path() { # name
 	if [ -d "$C/inputs/$1" ]; then echo "$C/inputs/$1"; else echo "$C/inputs/$1.xml"; fi
 }
 
+# XmlBeef: the Release XmlTester (beefbuild -config=Release at the repository root)
+XT="$C/../../build/Release_Linux64/XmlTester/XmlTester"
+
 # name|command prefix (the harness takes <file-or-dir> <min-samples> after it)
 BUILDERS=(
+	"XmlBeef|$XT -bench document"
 	"libxml2|$B/libxml2 dom"
 	"pugixml|$B/pugixml default"
 	"pugixml ws|$B/pugixml ws"
@@ -83,6 +89,7 @@ BUILDERS=(
 	"Xml-Beef|$B/beef-xmlbench xml-beef"
 )
 READERS=(
+	"XmlBeef reader|$XT -bench events"
 	"libxml2 reader|$B/libxml2 reader"
 	"expat|$B/expat"
 	"quick-xml|$B/rust-xmlbench quick-xml"
@@ -181,6 +188,10 @@ attribute-heavy), **atom** 10.1 MB (namespace-heavy Atom), **book-utf16** 9.9 MB
 Implementations (pinned in fetch.sh and the harness manifests; the harness sources say exactly what
 each column times):
 
+- XmlBeef (this repository, Release `XmlTester -bench`, XmlTester/src/Bench.bf): `XmlBeef` reads each
+  input into an XmlDocument (reused, as an application re-reading files would); `XmlBeef reader` passes
+  over every XmlReader event, touching each value. Full well-formedness and namespace checks, the
+  internal subset applied, UTF-16 transcoded to UTF-8.
 - C, built from source with -O3: libxml2 2.15.4 (`libxml2`: xmlReadMemory with NOENT | NONET into its
   tree; `libxml2 reader`: xmlTextReader over the same buffer), libexpat 2.8.5 (namespace-aware, SAX
   callbacks).

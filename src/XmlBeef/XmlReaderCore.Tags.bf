@@ -7,15 +7,33 @@ namespace XmlBeef;
 /// Start and end tags: attributes, their normalization and defaults, and namespaces.
 extension XmlReaderCore<TCursor>
 {
+	/// Bytes that end a plain attribute value: either quote, `<`, `&`, and those below 0x20 (tab, LF,
+	/// CR: other controls cannot be in the input).
+	static uint8[256] sValueByte = BuildValueByte();
+
+	static uint8[256] BuildValueByte()
+	{
+		uint8[256] table = default;
+		for (int i < 0x20)
+			table[i] = 1;
+		table['"'] = 1;
+		table['\''] = 1;
+		table['<'] = 1;
+		table['&'] = 1;
+		return table;
+	}
+
 	/// A start tag or empty-element tag at mPos (`<` then a name).
 	Result<XmlEvent, XmlFailure> ReadStartTag()
 	{
 		int start = mPos;
-		int nameEnd = Try!(ScanName(start + 1, "an element name after `<`"));
-		XmlNameId name = mNames.Intern(View(start + 1, nameEnd - start - 1));
+		int nameEnd = Try!(ScanAsciiName(start + 1, "an element name after `<`"));
+		XmlNameId name = mNames.InternCached(View(start + 1, nameEnd - start - 1));
 		int p = nameEnd;
 		mAttributes.Clear();
 		mAttributeBuffer.Clear();
+		// Whether namespace processing has anything to do: a prefix, or a declaration
+		mNamespaceWork = mNames.HasColon(name);
 		bool empty = false;
 		while (true)
 		{
@@ -45,11 +63,13 @@ extension XmlReaderCore<TCursor>
 			}
 			if (mConfig.MaxAttributesPerElement > 0 && mAttributes.Count >= mConfig.MaxAttributesPerElement)
 				return .Err(Fail(.ResourceLimitExceeded, scope $"The element has more attributes than MaxAttributesPerElement ({mConfig.MaxAttributesPerElement})", p));
-			int attrEnd = Try!(ScanName(p, "an attribute name, `>` or `/>`"));
-			AttributeRecord attribute = default;
-			attribute.mName = mNames.Intern(View(p, attrEnd - p));
+			int attrEnd = Try!(ScanAsciiName(p, "an attribute name, `>` or `/>`"));
+			ref AttributeRecord attribute = ref mAttributes.AddDefault();
+			attribute.mName = mNames.InternCached(View(p, attrEnd - p));
 			attribute.mOffset = (int32)DocOffset(p);
 			attribute.mSpecified = true;
+			if (attribute.mName == mXmlnsPrefix || mNames.HasColon(attribute.mName))
+				mNamespaceWork = true;
 			p = SkipSpace(attrEnd);
 			if (At(p) != '=')
 				return .Err(Unexpected(p, scope $"`=` after the attribute name `{mNames[attribute.mName]}`"));
@@ -57,39 +77,66 @@ extension XmlReaderCore<TCursor>
 			char8 quote = At(p);
 			if (quote != '"' && quote != '\'')
 				return .Err(Unexpected(p, "a quoted attribute value (`\"…\"` or `'…'`)"));
+			// The common case inline: a value without references or whitespace that ends in the window
+			int valueStart = p + 1;
+			int q = valueStart;
+			while (q + 8 <= mEnd)
+			{
+				uint64 word = XmlChar.Load64(mData + q);
+				if ((XmlChar.BytesEqual(word, (uint8)quote) | XmlChar.BytesEqual(word, (uint8)'<') | XmlChar.BytesEqual(word, (uint8)'&') | XmlChar.BytesBelowSpace(word)) != 0)
+					break;
+				q += 8;
+			}
+			while (q < mEnd && sValueByte[(uint8)mData[q]] == 0)
+				q++;
+			if (q < mEnd && mData[q] == quote && (mConfig.MaxTextBytes <= 0 || q - valueStart <= mConfig.MaxTextBytes))
+			{
+				attribute.mValue = View(valueStart, q - valueStart);
+				attribute.mBufferStart = -1;
+				p = q + 1;
+				continue;
+			}
 			p = Try!(ReadAttributeValue(p, mAttributeBuffer, out attribute.mValue, let bufferStart));
 			attribute.mBufferStart = (int32)bufferStart;
 			attribute.mBufferLength = bufferStart >= 0 ? (int32)(mAttributeBuffer.Length - bufferStart) : 0;
-			mAttributes.Add(attribute);
 		}
 		mPos = p;
-		Try!(CheckDuplicateAttributes());
-		if (mConfig.DtdMode == .Internal)
+		if (mAttributes.Count > 1)
+			Try!(CheckDuplicateAttributes());
+		if (mConfig.DtdMode == .Internal && mDtd.mAttributes.Count > 0)
 		{
 			let declarations = mDtd.GetAttributes(name);
 			if (declarations != null)
 				Try!(ApplyDeclarations(declarations, start));
 		}
-		for (var attribute in ref mAttributes)
+		if (mAttributeBuffer.Length > 0)
 		{
-			if (attribute.mBufferStart >= 0)
-				attribute.mValue = StringView(mAttributeBuffer.Ptr + attribute.mBufferStart, attribute.mBufferLength);
+			for (int i < mAttributes.Count)
+			{
+				ref AttributeRecord attribute = ref mAttributes[i];
+				if (attribute.mBufferStart >= 0)
+					attribute.mValue = StringView(mAttributeBuffer.Ptr + attribute.mBufferStart, attribute.mBufferLength);
+			}
 		}
 		int bindingStart = mBindings.Count;
 		XmlNameId ns = .None;
 		if (mConfig.Namespaces)
-			ns = Try!(ResolveNamespaces(name, start + 1, nameEnd));
+		{
+			if (mNamespaceWork)
+				ns = Try!(ResolveNamespaces(name, start + 1, nameEnd));
+			else if (mBindings.Count > 0)
+				ns = DefaultNamespace();
+		}
 		if (mConfig.MaxDepth > 0 && mElements.Count >= mConfig.MaxDepth)
 			return .Err(Fail(.ResourceLimitExceeded, scope $"Elements are nested deeper than MaxDepth ({mConfig.MaxDepth})", start, nameEnd - start));
 		if (mConfig.MaxNodes > 0 && ++mElementCount > mConfig.MaxNodes)
 			return .Err(Fail(.ResourceLimitExceeded, scope $"The document has more elements than MaxNodes ({mConfig.MaxNodes})", start, nameEnd - start));
-		Element element;
+		ref Element element = ref mElements.AddDefault();
 		element.mName = name;
 		element.mNamespace = ns;
 		element.mFrameLevel = (int32)mFrames.Count;
 		element.mBindings = (int32)bindingStart;
 		element.mStart = (int32)DocOffset(start);
-		mElements.Add(element);
 		mNameId = name;
 		mName = mNames[name];
 		mNamespace = ns;
@@ -132,7 +179,15 @@ extension XmlReaderCore<TCursor>
 		char8 quote = mData[pos];
 		int p = pos + 1;
 		int runStart = p;
-		// Fast path: plain text up to the quote is a view
+		// Fast path: plain text up to the quote is a view. Words without the quote, `<`, `&` or a byte
+		// below 0x20 (tab, LF and CR: other controls cannot be in the input) are skipped whole.
+		while (p + 8 <= mEnd)
+		{
+			uint64 word = XmlChar.Load64(mData + p);
+			if ((XmlChar.BytesEqual(word, (uint8)quote) | XmlChar.BytesEqual(word, (uint8)'<') | XmlChar.BytesEqual(word, (uint8)'&') | XmlChar.BytesBelowSpace(word)) != 0)
+				break;
+			p += 8;
+		}
 		while (true)
 		{
 			if (p >= mEnd && !Grow(p, 1))
@@ -332,6 +387,8 @@ extension XmlReaderCore<TCursor>
 			attribute.mOffset = (int32)DocOffset(tagStart);
 			attribute.mSpecified = false;
 			mAttributes.Add(attribute);
+			if (attribute.mName == mXmlnsPrefix || mNames.HasColon(attribute.mName))
+				mNamespaceWork = true;
 		}
 		return .Ok;
 	}
@@ -420,8 +477,9 @@ extension XmlReaderCore<TCursor>
 		XmlNameId ns = Try!(ResolvePrefix(mNames.PrefixOf(element), true, nameStart, nameEnd - nameStart));
 
 		int prefixed = 0;
-		for (var attribute in ref mAttributes)
+		for (int i < mAttributes.Count)
 		{
+			ref AttributeRecord attribute = ref mAttributes[i];
 			attribute.mLocal = attribute.mName;
 			if (attribute.mName == mXmlnsPrefix)
 			{
@@ -456,6 +514,17 @@ extension XmlReaderCore<TCursor>
 		return ns;
 	}
 
+	/// The default namespace in scope (None for none).
+	XmlNameId DefaultNamespace()
+	{
+		for (int i = mBindings.Count - 1; i >= 0; i--)
+		{
+			if (!mBindings[i].mPrefix.IsValid)
+				return mBindings[i].mUri;
+		}
+		return .None;
+	}
+
 	Result<void, XmlFailure> AddBinding(Binding binding, int offset)
 	{
 		if (mConfig.MaxNamespaceBindings > 0 && mBindings.Count >= mConfig.MaxNamespaceBindings)
@@ -469,16 +538,7 @@ extension XmlReaderCore<TCursor>
 	Result<XmlNameId, XmlFailure> ResolvePrefix(XmlNameId prefix, bool element, int offset, int length)
 	{
 		if (!prefix.IsValid)
-		{
-			if (!element)
-				return XmlNameId.None;
-			for (int i = mBindings.Count - 1; i >= 0; i--)
-			{
-				if (!mBindings[i].mPrefix.IsValid)
-					return mBindings[i].mUri;
-			}
-			return XmlNameId.None;
-		}
+			return element ? DefaultNamespace() : XmlNameId.None;
 		if (prefix == mXmlPrefix)
 			return mXmlUri;
 		if (prefix == mXmlnsPrefix)

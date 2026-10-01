@@ -25,6 +25,14 @@ extension XmlReaderCore<TCursor>
 	int ScanText(int pos)
 	{
 		int p = pos;
+		// Words without a stop byte are skipped whole; the one holding it is walked byte by byte
+		while (p + 8 <= mEnd)
+		{
+			uint64 word = XmlChar.Load64(mData + p);
+			if ((XmlChar.BytesEqual(word, (uint8)'<') | XmlChar.BytesEqual(word, (uint8)'&') | XmlChar.BytesEqual(word, (uint8)']') | XmlChar.BytesEqual(word, (uint8)'\r')) != 0)
+				break;
+			p += 8;
+		}
 		while (true)
 		{
 			if (p >= mEnd && !Grow(p, 1))
@@ -151,6 +159,7 @@ extension XmlReaderCore<TCursor>
 	}
 
 	/// Reports `value` as a Text event, or nothing when it is empty.
+	[Inline]
 	Result<XmlEvent, XmlFailure> TextEvent(StringView value, int start, int end)
 	{
 		if (value.IsEmpty)

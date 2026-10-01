@@ -28,7 +28,8 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 | `XmlDocument.Write.bf` | `XmlWriteOptions`; the canonical writer (`Write`) and its escaping |
 | `XmlNode.bf` | `XmlNodeId`, the `XmlNode` handle (kind, names, value, navigation), `XmlNodeList`, `XmlElementList`, `XmlAttribute`, `XmlAttributeList` |
 | `XmlNode.Lookup.bf` | `Find` (by name, by namespace and local name), attribute lookups and typed getters, `Text`/`AppendText`/`AppendInnerText`, `XmlDescendants`, `XmlValueParser` |
-| `XmlDocumentStore.bf` | Internal: the document's text arena (KdlBeef's pool-recycling `BumpAllocator`) |
+| `XmlDocumentStore.bf` | Internal: the document's text (its copy of the input, decoded values) in an `XmlTextArena` |
+| `XmlTextArena.bf`, `XmlStack.bf` | Internal: a chunked byte arena that keeps its chunks across resets; a growable array with inlined `Add`/`PopBack`/indexer |
 | `XmlReader.bf` | `XmlEvent`; `XmlReader` (public: events, names, namespaces, attributes, DOCTYPE and declaration fields), dispatching to the core |
 | `XmlReaderCore.bf` | `XmlFailure`; `XmlReaderCore<TCursor>`: states and the step loop, prolog/epilog and content steps, entity input frames, expansion accounting, the window helpers, name scanning, `Fail` |
 | `XmlReaderCore.Tags.bf` | Start and end tags, attribute values (normalization, references), ATTLIST defaults and types, namespace binding and resolution, duplicate checks |
@@ -120,10 +121,40 @@ measured choice).
 ### Names
 
 Element and attribute names (and namespace URIs) are interned in the reader's `XmlNameTable`: an
-open-addressing table over IDs with a seeded hash, text in a `BumpAllocator` that never moves. An
-entry caches whether it is a valid QName and the IDs of its prefix and local part. End tags compare
-bytes with the open element's interned name and do not intern again; duplicate attributes compare
-IDs (pairwise up to 16, a set above).
+open-addressing table over IDs with a seeded hash, text in an `XmlTextArena` that never moves. Each
+slot holds the ID and the hash, so a probe that misses reads no entry; the hash reads whole words
+(overlapping at the end, never past it) and takes the slot bits from a final multiply's high half.
+In front of it, a 256-entry direct-mapped cache (first byte, last byte, length) answers repeated names
+with one compare. The four names the namespace rules need (`xml`, `xmlns` and their URIs) are static
+entries at fixed IDs that survive `Clear`. An entry caches whether it is a valid QName and the IDs of
+its prefix and local part. End tags compare bytes with the open element's interned name and do not
+intern again; duplicate attributes compare IDs (pairwise up to 16, a set above).
+
+### Fast paths
+
+Phase 3 measured with instruction counts (`bench/instructions.sh`, which load does not distort) and
+`perf`. What paid:
+
+- **Word-at-a-time scans**: text runs stop at `<`, `&`, `]` or CR and attribute values at their quote,
+  `<`, `&` or a byte below 0x20, 8 bytes at a time (`XmlChar.BytesEqual`, `BytesBelowSpace`); the
+  word holding a stop is walked byte by byte (Beef has no trailing-zero-count intrinsic).
+- **Validation**: `FindInvalid` checks 32 bytes per step, also when they hold tab, LF or CR (an LF in
+  every 32-byte window of indented text had sent it to the 8-byte path, 5.7 instructions per byte).
+- **What validation guarantees**: after it, a byte up to 0x20 in the window is space, tab, LF or CR,
+  so the reader's whitespace test is one compare.
+- **Start tags**: ASCII names scanned inline (`ScanAsciiName`, the full `ScanName` only for non-ASCII,
+  the window's end or an error); a plain attribute value found inline; namespace processing skipped
+  for a tag with no prefix and no `xmlns` (only the default namespace is looked up).
+- **Inlining**: the per-event lists (open elements, bindings, a tag's attributes, the document's node
+  and attribute tables) are `XmlStack`s with inlined `Add`/`PopBack`/indexer (corlib's `List.Add` is
+  not inlined); `StepContent`, `TextEvent`, `EndElement` and `Intern` are `[Inline]`; no
+  `Runtime.Assert` on a hot path (it stays in Release).
+- **Transcoding**: UTF-16 is written into a buffer sized for the worst case, runs of ASCII four units
+  at a time (book-utf16: 43 to 11 instructions per byte).
+- **Per-document costs**: arenas (`XmlTextArena`) that keep their chunks across resets instead of
+  allocators rebuilt per document, a DTD cleared only after a DOCTYPE, the document copying its input
+  once and keeping values that view the copy (only decoded text is copied). A tiny document went from
+  5,600 to 2,000 instructions, which mattered for 17,000 small SVG files.
 
 ### Attributes
 
@@ -178,10 +209,11 @@ The document owns an `XmlNameTable` and hands it to its reader (`XmlReader.Reset
 reader interns straight into it: element, attribute, PI-target and entity names are IDs in the node
 and attribute records, with no copy. Attributes are one document-wide table, each element holding a
 start and count (KdlBeef's entries): name, local name and namespace IDs, the value, and a `Defaulted`
-flag for ATTLIST defaults. Lookups scan an element's few attributes comparing names. Text, values and
-the DOCTYPE's identifiers and internal subset are copied into the store (`XmlDocumentStore`, KdlBeef's
-pool-recycling arena). The declaration (version, encoding, standalone) and the notations are document
-fields.
+flag for ATTLIST defaults. Lookups scan an element's few attributes comparing names. The document
+copies its input once into its store (`XmlDocumentStore`, an `XmlTextArena` whose chunks are reused
+across reads) and reads that copy, so text and values that view it are kept as views; decoded ones
+(references, line ends), the DOCTYPE's identifiers and internal subset are copied. The declaration
+(version, encoding, standalone) and the notations are document fields.
 
 ### Lookups
 

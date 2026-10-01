@@ -119,13 +119,16 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 	XmlParseError mError;
 	internal XmlReadConfig mConfig;
 
-	List<Element> mElements ~ delete _;
+	XmlStack<Element> mElements ~ delete _;
 	List<InputFrame> mFrames ~ delete _;
-	List<Binding> mBindings ~ delete _;
+	XmlStack<Binding> mBindings ~ delete _;
 	/// After an EndElement, its namespace declarations go out of scope on the next call (-1: none).
 	int mBindingsToPop = -1;
 	/// An empty element's EndElement is due.
 	bool mPendingEnd;
+	/// The current start tag has a prefixed name or a namespace declaration (else namespace processing
+	/// only looks up the default namespace).
+	bool mNamespaceWork;
 
 	/// The names: the reader's own table, or a document's (which then owns them, and clears it).
 	XmlNameTable mOwnNames ~ delete _;
@@ -149,7 +152,7 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 	internal int mDepth;
 	internal int mEventOffset;
 	internal int mEventEnd;
-	internal List<AttributeRecord> mAttributes ~ delete _;
+	internal XmlStack<AttributeRecord> mAttributes ~ delete _;
 	internal StringView mVersion;
 	internal StringView mEncodingName;
 	internal XmlStandalone mStandalone;
@@ -238,10 +241,10 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 		mInternalSubset = default;
 		mExpandedBytes = 0;
 		mElementCount = 0;
-		mXmlPrefix = mNames.Intern("xml");
-		mXmlnsPrefix = mNames.Intern("xmlns");
-		mXmlUri = mNames.Intern(cXmlNamespace);
-		mXmlnsUri = mNames.Intern(cXmlnsNamespace);
+		mXmlPrefix = XmlNameTable.cXml;
+		mXmlnsPrefix = XmlNameTable.cXmlns;
+		mXmlUri = XmlNameTable.cXmlNamespace;
+		mXmlnsUri = XmlNameTable.cXmlnsNamespace;
 	}
 
 	/// The next event; on failure the error is in mError. (XmlReader.Next makes the public Result, so
@@ -419,6 +422,7 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 
 	// Inside the root element
 
+	[Inline]
 	Result<XmlEvent, XmlFailure> StepContent()
 	{
 		int p = mPos;
@@ -457,6 +461,7 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 	}
 
 	/// Reports the EndElement of the innermost element (at the given range) and closes it.
+	[Inline]
 	XmlEvent EndElement(int start, int end)
 	{
 		Element element = mElements.PopBack();
@@ -604,7 +609,7 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 	[Inline]
 	bool StartsWith(int pos, StringView literal)
 	{
-		return AvailN(pos, literal.Length) && Internal.MemCmp(mData + pos, literal.Ptr, literal.Length) == 0;
+		return AvailN(pos, literal.Length) && XmlChar.EqualBytes(mData + pos, literal.Ptr, literal.Length);
 	}
 
 	[Inline]
@@ -613,7 +618,8 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 		return StringView(mData + start, length);
 	}
 
-	/// Skips `S` (space, tab, LF, CR). @return The position after it.
+	/// Skips `S` (space, tab, LF, CR). The window holds only validated text, where the bytes up to 0x20
+	/// are exactly those four, so one compare tells. @return The position after it.
 	[Inline]
 	int SkipSpace(int pos)
 	{
@@ -626,8 +632,7 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 				if (!Grow(p, 1))
 					return p;
 			}
-			char8 c = mData[p];
-			if (c != ' ' && c != '\n' && c != '\t' && c != '\r')
+			if ((uint8)mData[p] > 0x20)
 				return p;
 			p++;
 		}
@@ -644,6 +649,31 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 		}
 		AvailN(pos, 4);
 		return XmlChar.Decode(mData, pos, out length);
+	}
+
+	/// ScanName with the common case inline: an ASCII name that ends inside the window within
+	/// MaxNameBytes. Anything else (non-ASCII, the window's end, an error) takes the full scan.
+	[Inline]
+	Result<int, XmlFailure> ScanAsciiName(int pos, StringView expected)
+	{
+		int p = pos;
+		if (p < mEnd && XmlChar.NameByteClass(mData[p]) == XmlChar.cNameStart)
+		{
+			p++;
+			while (p < mEnd)
+			{
+				uint8 cls = XmlChar.NameByteClass(mData[p]);
+				if ((uint8)(cls - 1) < 2)
+				{
+					p++;
+					continue;
+				}
+				if (cls == XmlChar.cNameStop && (mConfig.MaxNameBytes <= 0 || p - pos <= mConfig.MaxNameBytes))
+					return p;
+				break;
+			}
+		}
+		return ScanName(pos, expected);
 	}
 
 	/// Scans a Name ([5]) at `pos`. @return Its end, or an error naming what was expected there.

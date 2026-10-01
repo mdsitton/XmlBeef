@@ -101,8 +101,8 @@ public class XmlDocument
 
 	internal XmlDocumentStore mStore ~ delete _;
 	internal XmlNameTable mNames ~ delete _;
-	internal List<XmlNodeRecord> mNodes ~ delete _;
-	internal List<XmlAttributeRecord> mAttributes ~ delete _;
+	internal XmlStack<XmlNodeRecord> mNodes ~ delete _;
+	internal XmlStack<XmlAttributeRecord> mAttributes ~ delete _;
 	/// The root element's ID (0 when empty) and the DOCTYPE's (0 when none).
 	internal uint32 mRoot;
 	internal uint32 mDocType;
@@ -122,6 +122,10 @@ public class XmlDocument
 	internal List<XmlNotation> mNotations ~ delete _;
 	/// Read with namespace processing.
 	internal bool mNamespaces;
+	/// The document's copy of the input it was read from: values that are views of it are kept as they
+	/// are, and only decoded text (references, line ends) is copied into the store.
+	char8* mInputStart;
+	char8* mInputEnd;
 	/// The source name of the last read (for errors).
 	internal String mSourceName ~ delete _;
 	/// Changes on every Clear and Read, so handles from before can tell they are stale.
@@ -214,6 +218,8 @@ public class XmlDocument
 		mInternalSubset = default;
 		mHasInternalSubset = false;
 		mNamespaces = true;
+		mInputStart = null;
+		mInputEnd = null;
 		XmlNodeRecord document = default;
 		document.mKind = .Document;
 		mNodes.Add(document);
@@ -250,7 +256,15 @@ public class XmlDocument
 		readerConfig.SourceName = mSourceName;
 		if (mReader == null)
 			mReader = new XmlReader();
-		mReader.Reset(input, readerConfig, mNames);
+		// One copy of the input; the reader's views into it last as long as the document
+		StringView owned = input;
+		if (config.MaxInputBytes <= 0 || input.Length <= config.MaxInputBytes)
+		{
+			owned = mStore.NewText(input);
+			mInputStart = owned.Ptr;
+			mInputEnd = owned.Ptr + owned.Length;
+		}
+		mReader.Reset(owned, readerConfig, mNames);
 		let result = Build(mReader, config);
 		// Nothing may keep viewing the caller's input
 		mReader.Reset(StringView());
@@ -368,7 +382,7 @@ public class XmlDocument
 					attribute.mName = reader.AttributeNameId(i);
 					attribute.mLocal = reader.AttributeLocalId(i);
 					attribute.mNamespace = reader.AttributeNamespaceId(i);
-					attribute.mValue = mStore.NewText(reader.AttributeValue(i));
+					attribute.mValue = Own(reader.AttributeValue(i));
 					attribute.mFlags = reader.IsAttributeSpecified(i) ? .None : .Defaulted;
 				}
 				LinkLastChild(current, id);
@@ -387,7 +401,7 @@ public class XmlDocument
 			case .ProcessingInstruction:
 				uint32 id = NewNode(.ProcessingInstruction);
 				mNodes[id].mName = mNames.Intern(reader.Name);
-				mNodes[id].mValue = mStore.NewText(reader.Value);
+				mNodes[id].mValue = Own(reader.Value);
 				// The internal subset's are the DOCTYPE's children, linked when it is reported
 				if (reader.IsInDocType)
 					mPendingDocTypeNodes.Add(id);
@@ -432,8 +446,18 @@ public class XmlDocument
 	void AddValueNode(XmlNodeKind kind, StringView value, uint32 parent)
 	{
 		uint32 id = NewNode(kind);
-		mNodes[id].mValue = mStore.NewText(value);
+		mNodes[id].mValue = Own(value);
 		LinkLastChild(parent, id);
+	}
+
+	/// A view the document owns: `text` itself when it views the document's copy of the input, else a
+	/// copy in the store.
+	[Inline]
+	StringView Own(StringView text)
+	{
+		if (text.Ptr >= mInputStart && text.Ptr + text.Length <= mInputEnd && mInputStart != null)
+			return text;
+		return mStore.NewText(text);
 	}
 
 	// Node table
@@ -453,13 +477,13 @@ public class XmlDocument
 	}
 
 	/// Adds an unlinked node.
+	[Inline]
 	internal uint32 NewNode(XmlNodeKind kind)
 	{
-		XmlNodeRecord node = default;
+		uint32 id = (uint32)mNodes.Count;
+		ref XmlNodeRecord node = ref mNodes.AddDefault();
 		node.mKind = kind;
 		node.mAttributeStart = (int32)mAttributes.Count;
-		uint32 id = (uint32)mNodes.Count;
-		mNodes.Add(node);
 		return id;
 	}
 

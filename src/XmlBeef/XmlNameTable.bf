@@ -54,61 +54,129 @@ internal class XmlNameTable
 	}
 
 	List<Entry> mEntries ~ delete _;
-	/// Open addressing, a power of two; each slot holds an ID (0: empty).
-	uint32[] mSlots ~ delete _;
-	BumpAllocator mText ~ delete _;
+	/// Open addressing, a power of two; each slot holds an ID in its low half and the name's hash in its
+	/// high half (0: empty), so a probe that misses does not read the entry.
+	uint64[] mSlots ~ delete _;
+	XmlTextArena mText ~ delete _;
 	uint64 mSeed;
 
 	static uint64 sSeedCounter = 0x9E3779B97F4A7C15UL;
 
+	/// The names every table holds, at these IDs, through every Clear (the namespace rules need them).
+	public const XmlNameId cXml = .(1);
+	public const XmlNameId cXmlns = .(2);
+	public const XmlNameId cXmlNamespace = .(3);
+	public const XmlNameId cXmlnsNamespace = .(4);
+	const int cPredefined = 4;
+	static StringView[cPredefined] sPredefined = .("xml", "xmlns", "http://www.w3.org/XML/1998/namespace", "http://www.w3.org/2000/xmlns/");
+
 	public this()
 	{
 		mEntries = new .();
-		mSlots = new uint32[64];
-		mText = new BumpAllocator(.Ignore);
+		mSlots = new uint64[64];
+		mText = new XmlTextArena();
 		sSeedCounter = sSeedCounter &* 6364136223846793005UL &+ 1442695040888963407UL;
 		mSeed = sSeedCounter ^ (uint64)(int)Internal.UnsafeCastToPtr(this);
 		mEntries.Add(default);
+		AddPredefined();
+	}
+
+	/// Interns the predefined names, whose text is static (not in the arena, which Clear resets).
+	void AddPredefined()
+	{
+		for (let name in sPredefined)
+		{
+			uint32 hash = Hash(name.Ptr, name.Length);
+			uint32 mask = (uint32)mSlots.Count - 1;
+			uint32 slot = hash & mask;
+			while (mSlots[slot] != 0)
+				slot = (slot + 1) & mask;
+			Entry entry = default;
+			entry.mPtr = name.Ptr;
+			entry.mLength = (int32)name.Length;
+			entry.mHash = hash;
+			entry.mColon = -1;
+			uint32 id = (uint32)mEntries.Count;
+			mEntries.Add(entry);
+			mSlots[slot] = ((uint64)hash << 32) | id;
+		}
 	}
 
 	/// @brief The number of interned strings.
 	public int Count => mEntries.Count - 1;
 
-	/// @brief Forget every name (IDs from before become invalid), keeping the table's memory.
+	/// @brief Forget every name but the predefined ones (IDs from before become invalid), keeping the
+	/// table's memory.
 	public void Clear()
 	{
-		mEntries.Clear();
-		mEntries.Add(default);
-		Internal.MemSet(mSlots.Ptr, 0, mSlots.Count * sizeof(uint32));
-		delete mText;
-		mText = new BumpAllocator(.Ignore);
+		if (mEntries.Count == 1 + cPredefined)
+			return;
+		mEntries.Count = 1;
+		Internal.MemSet(mSlots.Ptr, 0, mSlots.Count * sizeof(uint64));
+		mText.Reset();
+		AddPredefined();
 	}
 
+	/// A seeded hash of the bytes, read as whole words (overlapping at the end, never past it).
 	[Inline]
 	uint32 Hash(char8* ptr, int length)
 	{
-		uint64 h = mSeed ^ ((uint64)length &* 0x100000001B3UL);
-		int i = 0;
-		while (i + 8 <= length)
+		uint64 h = mSeed ^ ((uint64)length << 56);
+		if (length >= 8)
 		{
-			uint64 word = ?;
-			Internal.MemCpy(&word, ptr + i, 8);
-			h = (h ^ word) &* 0x9E3779B97F4A7C15UL;
-			h ^= h >> 29;
-			i += 8;
+			int i = 0;
+			while (i + 8 < length)
+			{
+				h = Mix(h ^ XmlChar.Load64(ptr + i));
+				i += 8;
+			}
+			h = Mix(h ^ XmlChar.Load64(ptr + length - 8));
 		}
-		while (i < length)
+		else if (length >= 4)
+			h = Mix(h ^ (((uint64)XmlChar.Load32(ptr) << 24) | XmlChar.Load32(ptr + length - 4)));
+		else if (length > 0)
+			h = Mix(h ^ ((uint64)(uint8)ptr[0] | ((uint64)(uint8)ptr[length >> 1] << 8) | ((uint64)(uint8)ptr[length - 1] << 16)));
+		// The high half of a multiply: every input bit reaches the slot bits
+		h = (h ^ (h >> 32)) &* 0xD6E8FEB86659FD93UL;
+		return (uint32)(h >> 32);
+	}
+
+	[Inline]
+	static uint64 Mix(uint64 x)
+	{
+		uint64 m = x &* 0x9E3779B97F4A7C15UL;
+		return m ^ (m >> 29);
+	}
+
+	/// Recently interned names, direct-mapped by first byte, last byte and length: documents repeat a
+	/// few names, and a hit costs a compare instead of a hash and a probe.
+	uint32[256] mCache;
+
+	/// @brief Intern with the recent-name cache in front (the reader's element and attribute names).
+	/// @param text The name (not empty).
+	/// @return Its ID.
+	[Inline]
+	public XmlNameId InternCached(StringView text)
+	{
+		int length = text.Length;
+		uint32 index = ((uint32)(uint8)text.Ptr[0] ^ ((uint32)(uint8)text.Ptr[length - 1] << 3) ^ ((uint32)length << 5)) & 0xFF;
+		// Not cleared with the table: an ID from before is checked against the entries like any other
+		uint32 id = mCache[index];
+		if (id != 0 && id < (uint32)mEntries.Count)
 		{
-			h = (h ^ (uint8)ptr[i]) &* 0x100000001B3UL;
-			i++;
+			ref Entry entry = ref mEntries[id];
+			if (entry.mLength == length && XmlChar.EqualBytes(entry.mPtr, text.Ptr, length))
+				return .(id);
 		}
-		h ^= h >> 32;
-		return (uint32)h;
+		let interned = Intern(text);
+		mCache[index] = interned.mValue;
+		return interned;
 	}
 
 	/// @brief The ID of `text`, interning a copy of it if it is new.
 	/// @param text The string.
 	/// @return Its ID.
+	[Inline]
 	public XmlNameId Intern(StringView text)
 	{
 		uint32 hash = Hash(text.Ptr, text.Length);
@@ -116,23 +184,33 @@ internal class XmlNameTable
 		uint32 slot = hash & mask;
 		while (true)
 		{
-			uint32 id = mSlots[slot];
-			if (id == 0)
+			uint64 entrySlot = mSlots[slot];
+			if (entrySlot == 0)
 				break;
-			ref Entry entry = ref mEntries[id];
-			if (entry.mHash == hash && entry.mLength == text.Length && Internal.MemCmp(entry.mPtr, text.Ptr, text.Length) == 0)
-				return .(id);
+			if ((uint32)(entrySlot >> 32) == hash)
+			{
+				uint32 id = (uint32)entrySlot;
+				ref Entry entry = ref mEntries[id];
+				if (entry.mLength == text.Length && XmlChar.EqualBytes(entry.mPtr, text.Ptr, text.Length))
+					return .(id);
+			}
 			slot = (slot + 1) & mask;
 		}
+		return Add(text, hash, slot);
+	}
+
+	/// Adds a name not in the table at `slot`.
+	XmlNameId Add(StringView text, uint32 hash, uint32 slot)
+	{
 		Entry entry = default;
-		entry.mPtr = (char8*)mText.Alloc(Math.Max(text.Length, 1), 1);
+		entry.mPtr = mText.Alloc(Math.Max(text.Length, 1));
 		Internal.MemCpy(entry.mPtr, text.Ptr, text.Length);
 		entry.mLength = (int32)text.Length;
 		entry.mHash = hash;
 		entry.mColon = (int32)text.IndexOf(':');
 		uint32 newId = (uint32)mEntries.Count;
 		mEntries.Add(entry);
-		mSlots[slot] = newId;
+		mSlots[slot] = ((uint64)hash << 32) | newId;
 		if (mEntries.Count * 2 > mSlots.Count)
 			Rehash();
 		return .(newId);
@@ -148,27 +226,32 @@ internal class XmlNameTable
 		uint32 slot = hash & mask;
 		while (true)
 		{
-			uint32 id = mSlots[slot];
-			if (id == 0)
+			uint64 entrySlot = mSlots[slot];
+			if (entrySlot == 0)
 				return .None;
-			ref Entry entry = ref mEntries[id];
-			if (entry.mHash == hash && entry.mLength == text.Length && Internal.MemCmp(entry.mPtr, text.Ptr, text.Length) == 0)
-				return .(id);
+			if ((uint32)(entrySlot >> 32) == hash)
+			{
+				uint32 id = (uint32)entrySlot;
+				ref Entry entry = ref mEntries[id];
+				if (entry.mLength == text.Length && XmlChar.EqualBytes(entry.mPtr, text.Ptr, text.Length))
+					return .(id);
+			}
 			slot = (slot + 1) & mask;
 		}
 	}
 
 	void Rehash()
 	{
-		uint32[] old = mSlots;
-		mSlots = new uint32[old.Count * 2];
+		uint64[] old = mSlots;
+		mSlots = new uint64[old.Count * 2];
 		uint32 mask = (uint32)mSlots.Count - 1;
 		for (int id = 1; id < mEntries.Count; id++)
 		{
-			uint32 slot = mEntries[id].mHash & mask;
+			uint32 hash = mEntries[id].mHash;
+			uint32 slot = hash & mask;
 			while (mSlots[slot] != 0)
 				slot = (slot + 1) & mask;
-			mSlots[slot] = (uint32)id;
+			mSlots[slot] = ((uint64)hash << 32) | (uint32)id;
 		}
 		delete old;
 	}

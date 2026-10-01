@@ -180,17 +180,39 @@ internal static class XmlEncodingDetector
 		return family >= .Utf16 && family <= .Utf32BE;
 	}
 
-	/// Converts UTF-16 or UTF-32 code units from `skip` on to UTF-8.
+	/// Converts UTF-16 or UTF-32 code units from `skip` on to UTF-8, into a buffer sized for the worst
+	/// case (3 bytes per UTF-16 unit, 4 per UTF-32 one) and trimmed after. Runs of ASCII in UTF-16LE,
+	/// the common case, are copied four units at a time.
 	static Result<void, XmlParseError> TranscodeWide(StringView input, int skip, XmlEncoding wide, String output)
 	{
 		uint8* b = (uint8*)input.Ptr;
 		int n = input.Length;
 		bool sixteen = wide == .Utf16LE || wide == .Utf16BE;
 		int unit = sixteen ? 2 : 4;
-		output.Reserve((n - skip) / unit * 3 / 2 + 16);
+		int start = output.Length;
+		uint8* o = (uint8*)output.PrepareBuffer((n - skip) / unit * (sixteen ? 3 : 4) + 4);
+		// Bytes written to o
+		int w = 0;
 		int i = skip;
 		while (i + unit <= n)
 		{
+			if (wide == .Utf16LE)
+			{
+				while (i + 8 <= n)
+				{
+					uint64 word = XmlChar.Load64((char8*)b + i);
+					if ((word & 0xFF80FF80FF80FF80UL) != 0)
+						break;
+					o[w] = (uint8)word;
+					o[w + 1] = (uint8)(word >> 16);
+					o[w + 2] = (uint8)(word >> 32);
+					o[w + 3] = (uint8)(word >> 48);
+					w += 4;
+					i += 8;
+				}
+				if (i + unit > n)
+					break;
+			}
 			uint32 cp;
 			switch (wide)
 			{
@@ -211,19 +233,56 @@ internal static class XmlEncodingDetector
 				if (i + 2 <= n)
 					low = wide == .Utf16LE ? ((uint32)b[i] | ((uint32)b[i + 1] << 8)) : (((uint32)b[i] << 8) | (uint32)b[i + 1]);
 				if (low < 0xDC00 || low > 0xDFFF)
-					return .Err(XmlParseError.At(.InvalidEncoding, "A UTF-16 high surrogate without its low surrogate", output, output.Length));
+					return .Err(WideError("A UTF-16 high surrogate without its low surrogate", output, start, w));
 				i += 2;
 				cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
 			}
 			else if (cp >= 0xD800 && cp <= 0xDFFF)
-				return .Err(XmlParseError.At(.InvalidEncoding, sixteen ? "A UTF-16 low surrogate without its high surrogate" : "A surrogate code point in UTF-32", output, output.Length));
+				return .Err(WideError(sixteen ? "A UTF-16 low surrogate without its high surrogate" : "A surrogate code point in UTF-32", output, start, w));
 			else if (cp > 0x10FFFF)
-				return .Err(XmlParseError.At(.InvalidEncoding, "A UTF-32 code unit beyond U+10FFFF", output, output.Length));
-			XmlChar.EncodeUtf8(output, cp);
+				return .Err(WideError("A UTF-32 code unit beyond U+10FFFF", output, start, w));
+			w = PutUtf8(o, w, cp);
 		}
+		output.Length = start + w;
 		if (i != n)
 			return .Err(XmlParseError.At(.InvalidEncoding, sixteen ? "The input ends in the middle of a UTF-16 code unit" : "The input ends in the middle of a UTF-32 code unit", output, output.Length));
 		return .Ok;
+	}
+
+	/// An error at the end of what was converted (`written` bytes from `start`), located in it.
+	static XmlParseError WideError(StringView message, String output, int start, int written)
+	{
+		output.Length = start + written;
+		return XmlParseError.At(.InvalidEncoding, message, output, output.Length);
+	}
+
+	/// Writes `cp` as UTF-8 at `dst[at]`. @return The index just past it.
+	[Inline]
+	static int PutUtf8(uint8* dst, int at, uint32 cp)
+	{
+		if (cp < 0x80)
+		{
+			dst[at] = (uint8)cp;
+			return at + 1;
+		}
+		if (cp < 0x800)
+		{
+			dst[at] = (uint8)(0xC0 | (cp >> 6));
+			dst[at + 1] = (uint8)(0x80 | (cp & 0x3F));
+			return at + 2;
+		}
+		if (cp < 0x10000)
+		{
+			dst[at] = (uint8)(0xE0 | (cp >> 12));
+			dst[at + 1] = (uint8)(0x80 | ((cp >> 6) & 0x3F));
+			dst[at + 2] = (uint8)(0x80 | (cp & 0x3F));
+			return at + 3;
+		}
+		dst[at] = (uint8)(0xF0 | (cp >> 18));
+		dst[at + 1] = (uint8)(0x80 | ((cp >> 12) & 0x3F));
+		dst[at + 2] = (uint8)(0x80 | ((cp >> 6) & 0x3F));
+		dst[at + 3] = (uint8)(0x80 | (cp & 0x3F));
+		return at + 4;
 	}
 
 	static void TranscodeLatin1(StringView input, String output)

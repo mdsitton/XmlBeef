@@ -87,6 +87,64 @@ internal static class XmlChar
 		return c >= 0x10000 && c <= 0x10FFFF;
 	}
 
+	/// @brief Whether `a[0 ..< length]` equals `b[0 ..< length]`: word compares (overlapping at the
+	/// end), no call; for the short names of end tags and the name table.
+	[Inline]
+	public static bool EqualBytes(char8* a, char8* b, int length)
+	{
+		if (length >= 8)
+		{
+			int i = 0;
+			while (i + 8 < length)
+			{
+				if (Load64(a + i) != Load64(b + i))
+					return false;
+				i += 8;
+			}
+			return Load64(a + length - 8) == Load64(b + length - 8);
+		}
+		if (length >= 4)
+			return Load32(a) == Load32(b) && Load32(a + length - 4) == Load32(b + length - 4);
+		for (int i < length)
+		{
+			if (a[i] != b[i])
+				return false;
+		}
+		return true;
+	}
+
+	[Inline]
+	public static uint64 Load64(char8* p)
+	{
+		uint64 word = ?;
+		Internal.MemCpy(&word, p, 8);
+		return word;
+	}
+
+	[Inline]
+	public static uint32 Load32(char8* p)
+	{
+		uint32 word = ?;
+		Internal.MemCpy(&word, p, 4);
+		return word;
+	}
+
+	/// @brief The high bit of each byte of `word` that equals `c`, exactly.
+	[Inline]
+	public static uint64 BytesEqual(uint64 word, uint8 c)
+	{
+		return ZeroBytes(word ^ ((uint64)c * 0x0101010101010101UL));
+	}
+
+	/// @brief The high bit of each byte of `word` below 0x20, exactly (bytes ≥ 0x80 excepted).
+	[Inline]
+	public static uint64 BytesBelowSpace(uint64 word)
+	{
+		const uint64 high = 0x8080808080808080UL;
+		// Adding 0x60 to a byte below 0x80 sets its high bit when it is at least 0x20
+		return ~((word & ~high) + 0x6060606060606060UL) & ~word & high;
+	}
+
 	/// @brief Whether `c` is XML whitespace (`S`, [3]): space, tab, LF or CR.
 	[Inline]
 	public static bool IsSpace(char8 c)
@@ -225,9 +283,18 @@ internal static class XmlChar
 		int i = from;
 		while (i < to)
 		{
-			// Words of ASCII without control characters other than tab, LF and CR need no further checks
-			while (i + 8 <= to && IsPlainAsciiWord(data + i))
+			// 32 bytes of printable ASCII at once, then words of ASCII without control characters other
+			// than tab, LF and CR: neither needs further checks
+			if (i + 32 <= to && IsPrintableAscii32(data + i))
+			{
+				i += 32;
+				continue;
+			}
+			if (i + 8 <= to && IsPlainAsciiWord(data + i))
+			{
 				i += 8;
+				continue;
+			}
 			int limit = Math.Min(i + 8, to);
 			while (i < limit)
 			{
@@ -317,6 +384,32 @@ internal static class XmlChar
 			return (seqLen > 0 && p + seqLen > to) ? p : to;
 		}
 		return to;
+	}
+
+	/// Whether the 32 bytes at `p` are all ASCII with no control characters but tab, LF and CR: exact
+	/// per byte, as below. Lines of text hold an LF every few dozen bytes, so the controls are checked
+	/// only when a byte below 0x20 is present.
+	[Inline]
+	static bool IsPrintableAscii32(uint8* p)
+	{
+		const uint64 high = 0x8080808080808080UL;
+		const uint64 add = 0x6060606060606060UL;
+		uint64 a = Load64((char8*)p);
+		uint64 b = Load64((char8*)p + 8);
+		uint64 c = Load64((char8*)p + 16);
+		uint64 d = Load64((char8*)p + 24);
+		if (((a | b | c | d) & high) != 0)
+			return false;
+		if (((a + add) & (b + add) & (c + add) & (d + add) & high) == high)
+			return true;
+		return (BadControls(a) | BadControls(b) | BadControls(c) | BadControls(d)) == 0;
+	}
+
+	/// The high bit of each byte of an ASCII word that is a control character other than tab, LF and CR.
+	[Inline]
+	static uint64 BadControls(uint64 word)
+	{
+		return BytesBelowSpace(word) & ~(BytesEqual(word, 0x09) | BytesEqual(word, 0x0A) | BytesEqual(word, 0x0D));
 	}
 
 	/// Whether the 8 bytes at `p` are ASCII other than the control characters, tab, LF and CR excepted.
