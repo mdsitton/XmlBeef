@@ -408,20 +408,63 @@ extension XmlDocument
 	}
 }
 
-/// @brief An attribute of an element: a view of the document's attribute table, valid while the
-/// document is not cleared or read again.
+/// @brief An attribute of an element: a view that names the attribute by its element and name, so it
+/// stays the same attribute when others are added or removed and its record moves. It is invalid
+/// (IsValid false; reading it is a fatal error) once the attribute is removed, its element removed, or
+/// the document cleared or read again. An attribute removed and set again under the same name is the
+/// same attribute to it.
 public struct XmlAttribute
 {
 	XmlDocument mDocument;
+	uint32 mElement;
+	XmlNameId mName;
+	uint32 mGeneration;
+	/// Where the record was when the view was made: checked first, searched for if it moved.
 	int mIndex;
 
-	internal this(XmlDocument document, int index)
+	internal this(XmlDocument document, uint32 element, int index)
 	{
 		mDocument = document;
+		mElement = element;
+		mName = document.mAttributes[index].mName;
+		mGeneration = document.mGeneration;
 		mIndex = index;
 	}
 
-	ref XmlAttributeRecord Record => ref mDocument.mAttributes[mIndex];
+	/// The record's index now, or -1 if the attribute is gone.
+	int Current
+	{
+		get
+		{
+			if (mDocument == null || mGeneration != mDocument.mGeneration || !mDocument.IsLive(mElement))
+				return -1;
+			ref XmlNodeRecord element = ref mDocument.mNodes[mElement];
+			int start = element.mAttributeStart;
+			int end = start + element.mAttributeCount;
+			if (mIndex >= start && mIndex < end && mDocument.mAttributes[mIndex].mName == mName)
+				return mIndex;
+			for (int i = start; i < end; i++)
+			{
+				if (mDocument.mAttributes[i].mName == mName)
+					return i;
+			}
+			return -1;
+		}
+	}
+
+	/// @brief Whether the attribute is still in its element (see the type).
+	public bool IsValid => Current >= 0;
+
+	ref XmlAttributeRecord Record
+	{
+		get
+		{
+			int index = Current;
+			if (index < 0)
+				Runtime.FatalError("XmlAttribute: the attribute was removed, or its element, or the document was cleared or read again");
+			return ref mDocument.mAttributes[index];
+		}
+	}
 
 	/// @brief The qualified name as written.
 	public StringView Name => mDocument.mNames[Record.mName];
@@ -452,7 +495,13 @@ public struct XmlAttribute
 	/// @return Whether it has one (not without Positions, nor for an attribute defaulted from the DTD).
 	public bool TryGetSourceRange(out XmlSourceRange range)
 	{
-		return mDocument.TryGetRange(mDocument.mAttributeRanges, mIndex, out range);
+		int index = Current;
+		if (index < 0)
+		{
+			range = default;
+			return false;
+		}
+		return mDocument.TryGetRange(mDocument.mAttributeRanges, index, out range);
 	}
 }
 
@@ -490,7 +539,7 @@ public struct XmlAttributeList : IEnumerable<XmlAttribute>
 		{
 			ref XmlNodeRecord element = ref Element;
 			Runtime.Assert(index >= 0 && index < element.mAttributeCount, "XmlAttributeList: index out of range");
-			return .(mDocument, element.mAttributeStart + index);
+			return .(mDocument, mElement, element.mAttributeStart + index);
 		}
 	}
 

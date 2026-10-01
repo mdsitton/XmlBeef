@@ -67,6 +67,10 @@ internal class XmlNameTable
 	public const XmlNameId cXmlns = .(2);
 	public const XmlNameId cXmlNamespace = .(3);
 	public const XmlNameId cXmlnsNamespace = .(4);
+	/// @brief The namespace the `xml` prefix is bound to, always.
+	public const String XmlNamespaceUri = "http://www.w3.org/XML/1998/namespace";
+	/// @brief The namespace of namespace declarations (`xmlns`, `xmlns:p`).
+	public const String XmlnsNamespaceUri = "http://www.w3.org/2000/xmlns/";
 	const int cPredefined = 4;
 	static StringView[cPredefined] sPredefined = .("xml", "xmlns", "http://www.w3.org/XML/1998/namespace", "http://www.w3.org/2000/xmlns/");
 

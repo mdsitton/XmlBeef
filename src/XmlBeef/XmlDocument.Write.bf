@@ -250,18 +250,26 @@ extension XmlDocument
 			FixUnencodable(output, start, .Text);
 		case .CData:
 			output.Append("<![CDATA[");
-			// `]]>` cannot be inside a CDATA section: end it there and start another
+			// `]]>` cannot be inside a CDATA section: end it there and start another. A CR would be
+			// read back as a line end: it goes between sections, as a character reference.
+			let value = node.mValue;
 			int run = 0;
-			for (int i = 0; i + 2 < node.mValue.Length; i++)
+			for (int i = 0; i < value.Length; i++)
 			{
-				if (node.mValue[i] == ']' && node.mValue[i + 1] == ']' && node.mValue[i + 2] == '>')
+				if (value[i] == '\r')
 				{
-					output.Append(node.mValue.Substring(run, i + 2 - run));
+					output.Append(value.Substring(run, i - run));
+					output.Append("]]>&#13;<![CDATA[");
+					run = i + 1;
+				}
+				else if (i + 2 < value.Length && value[i] == ']' && value[i + 1] == ']' && value[i + 2] == '>')
+				{
+					output.Append(value.Substring(run, i + 2 - run));
 					output.Append("]]><![CDATA[");
 					run = i + 2;
 				}
 			}
-			output.Append(node.mValue.Substring(run));
+			output.Append(value.Substring(run));
 			output.Append("]]>");
 			FixUnencodable(output, start, .CData);
 		case .Comment:
@@ -435,6 +443,10 @@ extension XmlDocument
 	/// line end).
 	internal static void AppendTextEscaped(String output, StringView text)
 	{
+		// The `]]` before a `>` may end the text written before this one (a sibling text node, or
+		// source a PreserveStyle document kept): only character data leaves `]]` in the output
+		char8 before1 = output.Length >= 1 ? output[output.Length - 1] : 0;
+		char8 before2 = output.Length >= 2 ? output[output.Length - 2] : 0;
 		int run = 0;
 		for (int i < text.Length)
 		{
@@ -445,7 +457,9 @@ extension XmlDocument
 			case '<': escape = "&lt;";
 			case '\r': escape = "&#13;";
 			case '>':
-				if (i < 2 || text[i - 1] != ']' || text[i - 2] != ']')
+				char8 prev1 = (i >= 1) ? text[i - 1] : before1;
+				char8 prev2 = (i >= 2) ? text[i - 2] : (i == 1) ? before1 : before2;
+				if (prev1 != ']' || prev2 != ']')
 					continue;
 				escape = "&gt;";
 			default: continue;

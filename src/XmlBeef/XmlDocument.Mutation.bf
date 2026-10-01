@@ -71,6 +71,102 @@ extension XmlDocument
 		MarkChanged(mNodes[id].mParent);
 	}
 
+	/// An element's attributes from ATTLIST defaults become specified (written): its declarations no
+	/// longer apply to it (renamed), or are gone (the DOCTYPE removed), and the value must not be lost.
+	internal void MaterializeDefaults(uint32 element)
+	{
+		ref XmlNodeRecord node = ref mNodes[element];
+		bool any = false;
+		for (int i = node.mAttributeStart; i < node.mAttributeStart + node.mAttributeCount; i++)
+		{
+			if (mAttributes[i].mFlags.HasFlag(.Defaulted))
+			{
+				mAttributes[i].mFlags &= ~.Defaulted;
+				any = true;
+			}
+		}
+		if (any)
+			MarkNode(element, .TagDirty);
+	}
+
+	/// The DOCTYPE was removed: the values its declarations supplied stay. Defaulted attributes become
+	/// specified; in a PreserveStyle document, text and attribute values whose source refers to its
+	/// entities are regenerated from their (expanded) values.
+	void DocTypeRemoved()
+	{
+		for (uint32 id = 1; id < (uint32)mNodes.Count; id++)
+		{
+			ref XmlNodeRecord node = ref mNodes[id];
+			if (node.mFlags.HasFlag(.Removed))
+				continue;
+			if (mPreserve && StyleFlags(id).HasFlag(.Captured))
+			{
+				// References to entities with empty text produced no node: in content they are all the
+				// source between nodes and before an end tag holds, and go with the declarations
+				ref XmlNodeStyle style = ref mNodeStyles[id];
+				if (HasEntityReference(Source(style.mLead, style.mStart)))
+				{
+					style.mLead = style.mStart;
+					MarkChanged(node.mParent);
+				}
+				if (node.mKind == .Element && HasEntityReference(Source(style.mInnerTail, style.mEndTagStart)))
+				{
+					style.mInnerTail = style.mEndTagStart;
+					MarkChanged(id);
+				}
+			}
+			if (node.mKind == .Element)
+			{
+				MaterializeDefaults(id);
+				if (!mPreserve)
+					continue;
+				// Produced by a reference: regenerated, not written as the reference
+				if (StyleFlags(id).HasFlag(.InEntity))
+					MarkNode(id, .TagDirty | .GroupDirty);
+				// Attribute values whose text is not their value: an entity reference, or normalization by an
+				// attribute type (NMTOKENS and the like), which the DTD did and no longer will
+				for (int i = node.mAttributeStart; i < node.mAttributeStart + node.mAttributeCount; i++)
+				{
+					if (i < mAttributeStyles.Count && mAttributeStyles[i].mFlags.HasFlag(.Captured) &&
+						Source(mAttributeStyles[i].mValueStart, mAttributeStyles[i].mValueEnd) != mAttributes[i].mValue)
+					{
+						MarkAttribute(i, .ValueDirty);
+						MarkNode(id, .TagDirty);
+					}
+				}
+			}
+			else if (mPreserve && node.mKind == .Text && StyleFlags(id).HasFlag(.Captured))
+			{
+				// Text read through a reference (its source has `&name;`), or produced by one
+				let style = mNodeStyles[id];
+				if (style.mFlags.HasFlag(.InEntity) || style.mFlags.HasFlag(.Shared) || HasEntityReference(Source(style.mStart, style.mEnd)))
+					MarkNode(id, .ValueDirty | .GroupDirty);
+			}
+			else if (mPreserve && node.mKind != .Element && StyleFlags(id).HasFlag(.InEntity))
+				MarkNode(id, .ValueDirty | .GroupDirty);
+		}
+	}
+
+	/// Whether `text` (source) has a general entity reference: `&name;`, not `&#…;` or one of the five
+	/// predefined.
+	static bool HasEntityReference(StringView text)
+	{
+		int at = 0;
+		while (true)
+		{
+			int amp = text.IndexOf('&', at);
+			if (amp < 0)
+				return false;
+			int semicolon = text.IndexOf(';', amp);
+			if (semicolon < 0)
+				return false;
+			let name = text.Substring(amp + 1, semicolon - amp - 1);
+			if (!name.StartsWith('#') && name != "lt" && name != "gt" && name != "amp" && name != "apos" && name != "quot")
+				return true;
+			at = semicolon;
+		}
+	}
+
 	/// Unlinks a node and marks it and every descendant removed. Their slots are not reused before
 	/// Clear, so handles to them become invalid rather than naming other nodes.
 	internal void RemoveNode(uint32 id)
@@ -80,7 +176,10 @@ extension XmlDocument
 		if (id == mRoot)
 			mRoot = 0;
 		if (id == mDocType)
+		{
 			mDocType = 0;
+			DocTypeRemoved();
+		}
 		// Walk the subtree through the links; the removed node's parent is now 0, so the walk stops on
 		// returning to it
 		uint32 current = id;
@@ -156,6 +255,7 @@ extension XmlDocument
 	{
 		if (!mNamespaces)
 			return;
+		NamespacesChanged();
 		uint32 current = root;
 		while (true)
 		{
@@ -301,6 +401,113 @@ extension XmlDocument
 			Runtime.FatalError(scope $"XmlBeef: the {what} contains a character XML does not allow, or is not UTF-8");
 	}
 
+	// Namespace well-formedness of an edited document
+
+	/// @brief Check the document against Namespaces in XML 1.0, as the reader would on reading it back:
+	/// every prefix bound where it is used, no two attributes of an element with the same namespace and
+	/// local name, and the rules for `xml`, `xmlns` and empty declarations. Mutations allow incomplete
+	/// states (an element added before its prefix is declared); WriteBytes and WriteFile check before
+	/// writing an edited document, Write(String) does not.
+	/// @return .Ok, or the first problem (no source position: it names the element).
+	public Result<void, XmlParseError> CheckNamespaces()
+	{
+		if (!mNamespaces || mRoot == 0)
+			return .Ok;
+		let names = mNames;
+		uint32 current = mRoot;
+		while (true)
+		{
+			ref XmlNodeRecord node = ref mNodes[current];
+			if (node.mKind == .Element)
+				Try!(CheckElementNamespaces(current));
+			if (node.mFirstChild != 0)
+			{
+				current = node.mFirstChild;
+				continue;
+			}
+			while (current != mRoot && mNodes[current].mNextSibling == 0)
+				current = mNodes[current].mParent;
+			if (current == mRoot)
+				break;
+			current = mNodes[current].mNextSibling;
+		}
+		mNamespacesChanged = false;
+		return .Ok;
+
+		XmlParseError Problem(XmlErrorKind kind, StringView message)
+		{
+			return XmlParseError(kind, message, 0, 0, 0, 0);
+		}
+
+		Result<void, XmlParseError> CheckElementNamespaces(uint32 id)
+		{
+			ref XmlNodeRecord element = ref mNodes[id];
+			StringView elementName = names[element.mName];
+			// Its declarations
+			for (int i = element.mAttributeStart; i < element.mAttributeStart + element.mAttributeCount; i++)
+			{
+				ref XmlAttributeRecord attribute = ref mAttributes[i];
+				StringView value = attribute.mValue;
+				if (attribute.mName == XmlNameTable.cXmlns)
+				{
+					if (value == XmlNameTable.XmlNamespaceUri || value == XmlNameTable.XmlnsNamespaceUri)
+						return .Err(Problem(.InvalidNamespaceDeclaration, scope $"{elementName}: the default namespace cannot be `{value}`"));
+					continue;
+				}
+				if (names.PrefixOf(attribute.mName) != XmlNameTable.cXmlns)
+					continue;
+				let prefix = names.LocalOf(attribute.mName);
+				StringView prefixText = names[prefix];
+				if (prefix == XmlNameTable.cXmlns)
+					return .Err(Problem(.InvalidNamespaceDeclaration, scope $"{elementName}: the prefix `xmlns` cannot be declared"));
+				if (prefix == XmlNameTable.cXml)
+				{
+					if (value != XmlNameTable.XmlNamespaceUri)
+						return .Err(Problem(.InvalidNamespaceDeclaration, scope $"{elementName}: the prefix `xml` can only be bound to `{XmlNameTable.XmlNamespaceUri}`"));
+					continue;
+				}
+				if (value.IsEmpty)
+					return .Err(Problem(.InvalidNamespaceDeclaration, scope $"{elementName}: the prefix `{prefixText}` cannot be undeclared (`xmlns:{prefixText}=\"\"`) in XML 1.0"));
+				if (value == XmlNameTable.XmlNamespaceUri || value == XmlNameTable.XmlnsNamespaceUri)
+					return .Err(Problem(.InvalidNamespaceDeclaration, scope $"{elementName}: the prefix `{prefixText}` cannot be bound to `{value}`"));
+			}
+			// Its name and its attributes' names: bound prefixes
+			let elementPrefix = names.PrefixOf(element.mName);
+			if (elementPrefix == XmlNameTable.cXmlns)
+				return .Err(Problem(.InvalidNamespaceDeclaration, scope $"{elementName}: an element cannot have the prefix `xmlns`"));
+			if (elementPrefix.IsValid && !LookupNamespace(id, elementPrefix).IsValid)
+				return .Err(Problem(.UnboundPrefix, scope $"{elementName}: the prefix `{names[elementPrefix]}` is not bound"));
+			for (int i = element.mAttributeStart; i < element.mAttributeStart + element.mAttributeCount; i++)
+			{
+				ref XmlAttributeRecord attribute = ref mAttributes[i];
+				let prefix = names.PrefixOf(attribute.mName);
+				if (!prefix.IsValid || prefix == XmlNameTable.cXmlns)
+					continue;
+				let ns = LookupNamespace(id, prefix);
+				if (!ns.IsValid)
+					return .Err(Problem(.UnboundPrefix, scope $"{elementName}: the prefix `{names[prefix]}` of the attribute `{names[attribute.mName]}` is not bound"));
+				// Unique (namespace, local name)
+				for (int j = element.mAttributeStart; j < i; j++)
+				{
+					ref XmlAttributeRecord other = ref mAttributes[j];
+					let otherPrefix = names.PrefixOf(other.mName);
+					if (!otherPrefix.IsValid || otherPrefix == XmlNameTable.cXmlns)
+						continue;
+					if (names.LocalOf(other.mName) == names.LocalOf(attribute.mName) && LookupNamespace(id, otherPrefix) == ns)
+						return .Err(Problem(.DuplicateAttribute, scope $"{elementName}: the attributes `{names[other.mName]}` and `{names[attribute.mName]}` have the same namespace and local name"));
+				}
+			}
+			return .Ok;
+		}
+	}
+
+	/// A mutation may have changed what names mean or bind: WriteBytes checks namespaces again.
+	internal void NamespacesChanged()
+	{
+		if (mNamespaces)
+			mNamespacesChanged = true;
+	}
+
 	// Writing bytes
 
 	/// @brief Write the document (as Write does) as bytes: in the document's encoding when it was read
@@ -322,6 +529,9 @@ extension XmlDocument
 	/// @return .Ok, or an error as WriteBytes(List<uint8>). The output is then as it was.
 	public Result<void, XmlParseError> WriteBytes(List<uint8> output, XmlWriteOptions options)
 	{
+		// An edited document must still be namespace well-formed
+		if (mNamespacesChanged)
+			Try!(CheckNamespaces());
 		XmlEncoding encoding = mPreserve ? mEncoding : .Utf8;
 		bool utf8Fallback = options.Unencodable == .Utf8;
 		if (encoding == .Custom && !utf8Fallback)

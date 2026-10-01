@@ -39,8 +39,10 @@ static class Mutate
 			Console.Error.WriteLine(written);
 			return 3;
 		}
-		let expected = doc.WriteCanonical(.. scope String());
-		let actual = again.WriteCanonical(.. scope String());
+		// The suite form: defaulted attributes in it (the canonical writer leaves them to the DTD, which
+		// would hide a lost one), adjacent text and CDATA merged
+		let expected = XmlCanonical.WriteSuiteForm(doc, .. scope String());
+		let actual = XmlCanonical.WriteSuiteForm(again, .. scope String());
 		if (expected != actual)
 		{
 			Console.Error.WriteLine("the written document reads back differently");
@@ -108,8 +110,20 @@ static class Mutate
 				if (child.IsEditable)
 					editable.Add(child);
 			}
-			int choice = random.Next(3);
-			if (editable.IsEmpty || choice == 0)
+			int choice = random.Next(4);
+			if (choice == 3)
+			{
+				// The whole DOCTYPE: what it supplied (defaults, entity text) must stay. Not with references to
+				// unread entities, which have no value to write without it.
+				for (let n in nodes)
+				{
+					if (n.Kind == .EntityReference)
+						return;
+				}
+				log.Append("remove the DOCTYPE\n");
+				docType.Remove();
+			}
+			else if (editable.IsEmpty || choice == 0)
 			{
 				log.Append("add a processing instruction to the DOCTYPE\n");
 				docType.AddProcessingInstruction("added", scope $"pi {edit}");
@@ -140,6 +154,10 @@ static class Mutate
 			log.AppendF("set attribute {} on {}\n", name, element.Name);
 			element.SetAttribute(name, scope $"v{edit}&<\"'");
 		case 1:
+			// Not where the internal subset may declare a default: reading the written document back
+			// supplies it again (RemoveAttribute's documented behavior)
+			if (doc.HasInternalSubset)
+				return;
 			for (let a in element.Attributes)
 			{
 				if (IsDeclaration(a))
@@ -161,7 +179,7 @@ static class Mutate
 				node.SetValue(scope $"t{edit} & < > ]]> \" '\r\n");
 			case .CData:
 				log.Append("set CDATA\n");
-				node.SetValue(scope $"c{edit} ]]> <&");
+				node.SetValue(scope $"c{edit} ]]> <&\r\n\r");
 			case .Comment:
 				log.Append("set comment\n");
 				node.SetValue(scope $" comment {edit} ");

@@ -517,10 +517,11 @@ public static class XmlSerializerCodeGen
 				}
 				let names = scope List<String>();
 				defer { ClearAndDeleteItems!(names); }
-				bool isAttribute = ClaimedNames(field, levelNaming, names);
+				let levelNamespace = TypeNamespace(level, .. scope .());
+				bool isAttribute = ClaimedNames(field, levelNaming, levelNamespace, names);
 				if (unwrappedMap)
 				{
-					// The entries' element name
+					// The entries' element name, in the field's namespace
 					ClearAndDeleteItems!(names);
 					let fieldType = field.FieldType;
 					let valueType = DictionaryValue(fieldType);
@@ -534,7 +535,8 @@ public static class XmlSerializerCodeGen
 						ElementName(valueType, entry);
 					else
 						ScalarTypeName(valueType, valueKind, levelNaming, entry);
-					names.Add(entry);
+					names.Add(Claim(FieldNamespace(field, false, levelNamespace, .. scope .()), entry, .. new .()));
+					delete entry;
 				}
 				let used = isAttribute ? attributes : elements;
 				for (let claim in names)
@@ -603,7 +605,7 @@ public static class XmlSerializerCodeGen
 	/// The names a field claims, and whether they are attribute names (else child element names): a
 	/// list's wrapper, or its items when unwrapped.
 	[Comptime]
-	static bool ClaimedNames(FieldInfo field, XmlNaming naming, List<String> names)
+	static bool ClaimedNames(FieldInfo field, XmlNaming naming, StringView typeNamespace, List<String> names)
 	{
 		let fieldType = field.FieldType;
 		let name = FieldName(field, naming, .. scope .());
@@ -612,17 +614,32 @@ public static class XmlSerializerCodeGen
 			useConverter = use.mConverter;
 		let kind = LeafKind(fieldType, useConverter, ?);
 		bool isAttribute = field.HasCustomAttribute<XmlAttributeAttribute>() || (IsScalar(kind) && !field.HasCustomAttribute<XmlElementAttribute>());
+		// The namespace as PlanField gives it (an object list's items: their type's, when it has one)
+		let ns = FieldNamespace(field, isAttribute, typeNamespace, .. scope .());
 		let element = ListElement(fieldType);
 		if (element != null && !field.HasCustomAttribute<XmlArrayAttribute>() && !isAttribute && !field.HasCustomAttribute<XmlNameAttribute>() &&
 			LeafKind(element, useConverter, ?) == .Object)
-			names.Add(ElementName(element, .. new .()));
+		{
+			let own = TypeNamespace(element, .. scope .());
+			names.Add(Claim(own.IsEmpty ? ns : own, ElementName(element, .. scope .()), .. new .()));
+		}
 		else if (field.GetCustomAttribute<XmlArrayAttribute>() case .Ok(let array) && array.Name != null)
-			names.Add(new .(array.Name));
+			names.Add(Claim(ns, array.Name, .. new .()));
 		else
-			names.Add(new .(name));
+			names.Add(Claim(ns, name, .. new .()));
 		for (let alias in field.GetCustomAttributes<XmlAliasAttribute>())
-			names.Add(new .(alias.mName));
+			names.Add(Claim(ns, alias.mName, .. new .()));
 		return isAttribute;
+	}
+
+	/// A claimed name with its namespace: `local`, or `{namespace}local` (James Clark's notation). See
+	/// XmlBind.IsClaimedElement and IsClaimedAttribute for what each matches.
+	[Comptime]
+	static void Claim(StringView ns, StringView local, String claim)
+	{
+		if (!ns.IsEmpty)
+			claim.AppendF("{{{}}}", ns);
+		claim.Append(local);
 	}
 
 	/// How a field or list item of `type` is handled.
@@ -739,7 +756,8 @@ public static class XmlSerializerCodeGen
 					continue;
 				let names = scope List<String>();
 				defer { ClearAndDeleteItems!(names); }
-				if (!ClaimedNames(field, naming, names))
+				// (The key attribute is in no namespace: only an unqualified claim is the same name)
+				if (!ClaimedNames(field, naming, TypeNamespace(level, .. scope .()), names))
 					continue;
 				for (let claim in names)
 				{
@@ -1251,7 +1269,7 @@ public static class XmlSerializerCodeGen
 	{
 		code.Append("\t{\n");
 		EmitReplaceList(code, "\t\t", name, listType, element);
-		code.AppendF("\t\tfor (let _c in _node.Children)\n\t\t{{\n\t\t\tif (_c.Kind != .Element || XmlBeef.XmlBind.IsClaimed(_c.LocalName, {}))\n\t\t\t\tcontinue;\n", claimedExpr);
+		code.AppendF("\t\tfor (let _c in _node.Children)\n\t\t{{\n\t\t\tif (_c.Kind != .Element || XmlBeef.XmlBind.IsClaimedElement(_c, {}))\n\t\t\t\tcontinue;\n", claimedExpr);
 		// The item types are found when this method is compiled, not now: they may derive from the type
 		// being generated (a Group holding Rects and Groups), which is not complete yet
 		code.AppendF("\t\t\tSystem.Compiler.Mixin(XmlBeef.XmlSerializerCodeGen.ChildrenDispatch(typeof({}), ", element.GetFullName(.. scope .()));

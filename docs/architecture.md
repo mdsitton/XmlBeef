@@ -77,7 +77,9 @@ corpora, also streamed) and `test-leaks.sh`.
 marks (UTF-32's before UTF-16's, since `FF FE 00 00` starts like `FF FE`), then Appendix F's byte
 patterns for BOM-less 16- and 32-bit input, EBCDIC and UTF-7 (rejected), else ASCII-compatible. The
 `encoding=` of the XML declaration is pre-scanned leniently (only EncName syntax; the reader parses
-the declaration strictly later) and picks the decoder of an ASCII-compatible document: UTF-8 is read
+the declaration strictly later); a declaration that goes on past the 4 KB prefix is "incomplete", not
+"absent", and memory and stream preparation read on (doubling, up to `MaxTokenBytes`) until its
+encoding is known. It picks the decoder of an ASCII-compatible document: UTF-8 is read
 as is; US-ASCII is checked strictly; ISO-8859-1, -9 and -11 are the exact ISO standards (C1 controls
 at 0x80–0x9F); every other single-byte label (windows-125x, ISO-8859-x, KOI8, Mac, IBM866) maps to a
 table generated from the WHATWG index files by `tools/gen-encoding-tables.py` (pinned by SHA-256), an
@@ -141,7 +143,10 @@ Line ends are normalized in the document only: a CR in replacement text came fro
 data. Recursion is caught by an `mExpanding` flag per entity (No Recursion), depth by
 `MaxEntityDepth`; every push adds the replacement text's length to the expansion count, checked
 against `MaxEntityExpansionBytes` and, past `EntityAmplificationThreshold`, against
-`MaxEntityAmplification` times the input size (`plan.md` §9 item 9). ATTLIST defaults built from
+`MaxEntityAmplification` times the document read so far, up to the end of the outermost reference
+(`plan.md` §9 item 9): the same from memory and from a stream whatever its buffer, and input after
+the reference cannot dilute it. An entity frame saves the outer window's retention offset with the
+rest and restores it, since one set inside the entity is relative to its text. ATTLIST defaults built from
 entity references count again each time they are applied. Errors inside an entity are located at
 the outermost reference and name the entity.
 
@@ -336,7 +341,18 @@ an element's namespace is resolved from the `xmlns` attributes in scope when it 
 moved, and setting or removing a declaration resolves the subtree under it again. What could not be
 written as well-formed XML (an invalid name or character, `--` in a comment, `?>` in PI data, a
 target `xml`) is a fatal error, as an invalid handle is; `XmlDocument.IsValidName` and `IsValidText`
-check first. Prefixes need only be declared by the time the document is written.
+check first. Prefixes need only be declared by the time the document is written: mutations may pass
+through namespace-invalid states, `XmlDocument.CheckNamespaces()` applies the reader's rules (bound
+prefixes, unique expanded attribute names, the `xml`/`xmlns` reservations, no undeclaring), and
+`WriteBytes`/`WriteFile` run it whenever a mutation may have changed names (`mNamespacesChanged`).
+
+Values the DTD supplied are not lost to edits: renaming an element turns its ATTLIST-defaulted
+attributes into specified ones (the old name's declarations no longer apply), and removing the
+DOCTYPE does so for every element and, in a PreserveStyle document, marks for regeneration the text
+its entities produced and the attribute values whose source text is not their value (references,
+type normalization). An `XmlAttribute` view names its attribute by element, name and generation: it
+follows the record when the table moves and is invalid once the attribute, its element or the
+document's content is gone.
 
 The DOCTYPE's children are the internal subset's processing instructions, whose places in the
 subset's text are recorded while reading (`mSubsetItems`). Both writers rebuild the subset around
@@ -458,7 +474,9 @@ KdlBeef's `[KdlObject]` design (`plan.md` §4.12) with XML's roles.
   matches any namespace (SVG elements read without declaring theirs), an attribute name without one
   matches only unprefixed attributes; a document read without namespaces matches whole names.
   Writing a name in a namespace uses a prefix bound in scope, or declares one (`xmlns` on a new
-  element, `xmlns:ns0` for an attribute).
+  element, `xmlns:ns0` for an attribute); the reserved namespaces always use `xml` and `xmlns`. The
+  names fields claim (for collisions, strict checks, `[XmlChildren]` and catch-all dictionaries) carry
+  their namespace (`local` or `{namespace}local`) and match by the same rules as reading.
 - **Runtime (`XmlBind`).** `Find*` locate a value as an `XmlValueRef` (element, attribute position,
   name, text); the first matching element wins. Names compare as interned IDs on the records, looked
   up once per call through the name table's recent-name cache (`FindCached`). `To*` convert with

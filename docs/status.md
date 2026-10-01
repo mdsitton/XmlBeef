@@ -1,20 +1,20 @@
 # XmlBeef status
 
-Last reviewed: 2026-10-01.
+Last reviewed: 2026-10-01 (after the code review's fixes).
 
 ## Verification baseline
 
 | Check | Expected result |
 |-------|-----------------|
-| `beefbuild -test` (Debug checks) | 228/228 pass |
-| `beefbuild -test -config=TestRelease` (Release settings) | 228/228 pass |
+| `beefbuild -test` (Debug checks) | 244/244 pass |
+| `beefbuild -test -config=TestRelease` (Release settings) | 244/244 pass |
 | `./test-xml-conformance.sh` (Debug `XmlTester`; run `beefbuild` first) | In each of the document, events, rewrite, stream, stream-events, collect and stream-collect modes (the stream modes through a 16-byte buffer; the collect modes with CollectErrors): 957/957 valid and invalid cases accepted, 950/951 not-wf cases rejected, each with its golden message (`tests/errors/<ID>.err`) (the one is `hst-lhs-007`, listed in `tests/xmlconf/expected-failures.txt`: `plan.md` §9 item 6), 262/262 canonical outputs byte for byte; in rewrite mode every accepted case's suite form also survives the canonical writer. 59 of the 66 not-wf cases with unread external entities accepted (tolerated); 27 error cases logged; 274 XML 1.1 and 310 other-edition cases skipped; the 9 NAMESPACE="no" cases run with `-no-ns` |
 | `BIN=./build/Release_Linux64/XmlTester/XmlTester ./test-xml-conformance.sh` (run `beefbuild -config=Release` first) | Same as Debug |
 | `./test-svg-corpus.sh` (and with the Release `BIN`) | 2390/2390 SVGs (W3C SVG 1.1 suite and resvg): read as a document, same suite form from events and from a stream with a 16-byte buffer, kept by the canonical writer, which is a fixed point |
-| `./test-roundtrip.sh` (and with the Release `BIN`) | 3347 inputs (the 957 accepted suite cases and the 2390 corpus SVGs): written back byte for byte with PreserveStyle (`XmlTester -roundtrip`, in the document's encoding) from memory and through a 16-byte stream; random edits (`XmlTester -mutate`, 3 seeds of 8 edits each: 10041 runs) all read back into the edited document. The edits include the DOCTYPE's processing instructions. Run with `SEEDS=10` (33470 runs) after the DOCTYPE edits (2026-10-01) |
+| `./test-roundtrip.sh` (and with the Release `BIN`) | 3347 inputs (the 957 accepted suite cases and the 2390 corpus SVGs): written back byte for byte with PreserveStyle (`XmlTester -roundtrip`, in the document's encoding) from memory and through a 16-byte stream; random edits (`XmlTester -mutate`, 3 seeds of 8 edits each: 10041 runs) all read back into the edited document, compared in the suite form (defaulted attributes included). The edits include the DOCTYPE's processing instructions and its removal, and CRs in CDATA. Run with `SEEDS=10` (33470 runs) after the review's fixes (2026-10-01) |
 | `./test-collect.sh` (and with the Release `BIN`) | Every suite case of the selection and every corpus SVG, mutated 10 times per seed for 2 seeds (8782 runs), read with CollectErrors from memory and through a 16-byte stream: no crash, no hang, the same errors and document both ways. Run with `SEEDS=5 ROUNDS=20` (21955 runs) at the end of the collect-errors work |
 | `./test-leaks.sh` | No leaks (LeakSanitizer over the TestRelease `[Test]`s) |
-| `beefbuild-win -test`, `beefbuild-win -test -config=TestRelease` (`~/development/beef-proton`) | 228/228 pass |
+| `beefbuild-win -test`, `beefbuild-win -test -config=TestRelease` (`~/development/beef-proton`) | 244/244 pass |
 | `tests/fetch-suites.sh` | W3C XML Conformance Test Suite 20130923 (2,585 cases), W3C SVG 1.1 Second Edition suite (606 SVGs), resvg test SVGs (1,784), each verified by SHA-256 or commit |
 | `bench/compare/run.sh` (XmlBeef's columns: `beefbuild -config=Release` first) | The existing implementations and `XmlBeef` / `XmlBeef reader`, whose check lines match libxml2's on all eight inputs; results in `bench/compare/results.md`, which does not exist yet: run.sh refuses to run above load average 2, and the machine has not been under it (P3T) |
 | `bench/compare/run-typed.sh` (`./build.sh rust go cs`, `beefbuild -config=Release`) | XmlBeef `[XmlObject]`, quick-xml + serde, Go encoding/xml Unmarshal and .NET XmlSerializer read `osm.xml` into the same model; all four check lines equal the ElementTree reference. No timed table yet (P3T); a smoke run under load (8.65, not comparable) had XmlBeef 129 MB/s, quick-xml + serde 91, XmlSerializer 64, encoding/xml 24 |
@@ -62,7 +62,7 @@ it.
 | PreserveStyle (`XmlMetadataMode.PreserveStyle`) | Done (phase 5): `Write` gives back an unchanged document byte for byte and regenerates only what changed; entity references kept until what they produced changes; `WriteBytes`/`WriteFile` in the document's encoding, with a choice for characters it cannot hold (`XmlWriteOptions.Unencodable`: error, character references, replacement, UTF-8, a handler). See `architecture.md` §4 |
 | Mutation | Done (phase 5): add, insert, move, remove, rename, set values, text and attributes, with namespaces resolved again. See `architecture.md` §4 |
 | Suite canonical form (`XmlCanonical.WriteSuiteForm`) | Done, from a reader or a document |
-| Scripts | `test-xml-conformance.sh` (document, events, rewrite, stream, stream-events; golden messages), `test-svg-corpus.sh`, `test-roundtrip.sh`, `test-leaks.sh`, `bench/instructions.sh` |
+| Scripts | `test-xml-conformance.sh` (document, events, rewrite, stream, stream-events, collect, stream-collect; golden messages), `test-svg-corpus.sh`, `test-roundtrip.sh`, `test-collect.sh`, `test-leaks.sh`, `bench/instructions.sh` |
 | Speed (phase 3) | Fast paths done (`architecture.md` §3 "Fast paths"), `XmlTester -bench`/`-bench-loop`, XmlBeef in `bench/compare/run.sh`; the timed run is pending (P3T) |
 | Typed mapping (`[XmlObject]`, `XmlSerializer`) | Done (phase 6): attributes, element text, own text, token-list attributes, repeated and wrapped lists of scalars and objects, child objects, `[XmlChildren]` dispatch, dictionaries in five shapes (`[XmlMap]`), namespaces, naming policies, aliases, required, strict types, converters, allocators, in-place writes that keep a PreserveStyle document. See `architecture.md` §6 |
 | Collect-errors (`XmlReadConfig.CollectErrors`) | Done (phase 7): every error reported and the read goes on; the document keeps what it read and lists the errors (`Errors`). See `architecture.md` §3 |
@@ -70,8 +70,18 @@ it.
 
 ## Open items
 
+The [2026-10-01 code review](review-2026-10-01.md) recorded fourteen reproduced correctness
+findings (R01-R14), performance and memory opportunities, and proposed architecture and test
+improvements. R01-R14, P01 and P03 are fixed, each with a regression in `XmlReviewTests.bf`; its
+"Resolution" section records the fixes and the policy decisions (R06, R09, R11, R14). Its remaining
+items are below (RV-).
+
 | ID | Item | Size |
 |----|------|------|
 | P3T | The timed benchmark: `cd bench/compare && ./run.sh > results.md && ./plot.py` (2–3 h) on a quiet machine (load average under 2; it was 6–19 all session), then set phase 3's numeric targets from it (`plan.md` §2.2) and check them | M |
 | P7 | Phase 7's extras, as needed: `ReadSubtree`, the streaming writer, the external-entity resolver (`plan.md` §6) | M |
 | P6T | The typed benchmark's timed run: `cd bench/compare && ./run-typed.sh` on a quiet machine, with P3T | S |
+| RV-P02 | Word scans (text, attribute values) do not resume after a stream refill; comments, CDATA and PIs are scalar (review P02) | S |
+| RV-P04 | Long-lived edited documents keep replaced values and moved attribute spans until Clear; no compaction (review P04) | M |
+| RV-A | Architecture: an explicit input-context type for frame save/restore and offsets (A01), semantic dependencies beside structural dirtiness (A02), the serializer generator split into planning and emission (A03), one documented lifetime contract (A04) | M |
+| RV-L | Known limits kept: a CR in a comment or PI data reads back as LF (no escape exists); removing a specified attribute that has a DTD default lets the default return on reading; references to unread entities stay as written after the DOCTYPE is removed | S |

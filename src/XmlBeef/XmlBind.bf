@@ -278,7 +278,7 @@ public struct XmlFreeChildCursor
 	/// @return The child.
 	public XmlNode Next(StringView local, StringView namespaceUri) mut
 	{
-		while (mNext.IsValid && (mNext.Kind != .Element || XmlBind.IsClaimed(mNext.LocalName, mClaimed)))
+		while (mNext.IsValid && (mNext.Kind != .Element || XmlBind.IsClaimedElement(mNext, mClaimed)))
 			mNext = mNext.NextSibling;
 		if (mNext.IsValid && XmlBind.IsElement(mNext, local, namespaceUri))
 		{
@@ -297,7 +297,7 @@ public struct XmlFreeChildCursor
 		{
 			let child = mNext;
 			mNext = mNext.NextSibling;
-			if (child.Kind == .Element && !XmlBind.IsClaimed(child.LocalName, mClaimed))
+			if (child.Kind == .Element && !XmlBind.IsClaimedElement(child, mClaimed))
 				XmlBind.RemoveWithIndent(child);
 		}
 	}
@@ -738,6 +738,17 @@ public static class XmlBind
 	/// `allowDefault` the default namespace (an empty prefix).
 	static bool FindPrefix(XmlNode element, StringView namespaceUri, bool allowDefault, String prefix)
 	{
+		// The reserved namespaces are bound without declarations, to their own prefixes only
+		if (namespaceUri == XmlNameTable.XmlNamespaceUri)
+		{
+			prefix.Set("xml");
+			return true;
+		}
+		if (namespaceUri == XmlNameTable.XmlnsNamespaceUri)
+		{
+			prefix.Set("xmlns");
+			return true;
+		}
 		let document = element.Document;
 		let names = document.mNames;
 		XmlNameId ns = names.Intern(namespaceUri);
@@ -963,15 +974,60 @@ public static class XmlBind
 
 	// [XmlChildren] and strict types
 
-	/// @brief Whether another field claims child elements named `local`.
-	/// @param local The local name.
-	/// @param claimed The names other fields use.
-	/// @return Whether it is claimed.
-	public static bool IsClaimed(StringView local, Span<StringView> claimed)
+	/// Splits a claim (`local` or `{namespace}local`) into its namespace (empty: none given) and local
+	/// name.
+	static void SplitClaim(StringView claim, out StringView ns, out StringView local)
 	{
-		for (let other in claimed)
+		ns = default;
+		local = claim;
+		if (claim.StartsWith('{'))
 		{
-			if (other == local)
+			int close = claim.IndexOf('}');
+			if (close > 0)
+			{
+				ns = claim.Substring(1, close - 1);
+				local = claim.Substring(close + 1);
+			}
+		}
+	}
+
+	/// @brief Whether a field claims the child element `element`: a claim without a namespace matches its
+	/// local name in any namespace (as element fields read), one with a namespace that namespace only.
+	/// @param element The element.
+	/// @param claimed The claims (`local` or `{namespace}local`).
+	/// @return Whether it is claimed.
+	public static bool IsClaimedElement(XmlNode element, Span<StringView> claimed)
+	{
+		if (claimed.IsEmpty)
+			return false;
+		StringView local = element.LocalName;
+		bool namespaces = element.Document.mNamespaces;
+		for (let claim in claimed)
+		{
+			SplitClaim(claim, let ns, let claimLocal);
+			if (claimLocal == local && (ns.IsEmpty || !namespaces || element.NamespaceUri == ns))
+				return true;
+		}
+		return false;
+	}
+
+	/// @brief Whether a field claims the attribute `attribute`: a claim without a namespace matches only
+	/// an attribute in none (as attribute fields read), one with a namespace that namespace only.
+	/// @param attribute The attribute.
+	/// @param namespaces Whether its document was read with namespaces (else names match whole).
+	/// @param claimed The claims (`local` or `{namespace}local`).
+	/// @return Whether it is claimed.
+	public static bool IsClaimedAttribute(XmlAttribute attribute, bool namespaces, Span<StringView> claimed)
+	{
+		for (let claim in claimed)
+		{
+			SplitClaim(claim, let ns, let claimLocal);
+			if (!namespaces)
+			{
+				if (attribute.Name == claimLocal)
+					return true;
+			}
+			else if (attribute.LocalName == claimLocal && attribute.NamespaceUri == ns)
 				return true;
 		}
 		return false;
@@ -1003,14 +1059,14 @@ public static class XmlBind
 		{
 			StringView name = attribute.Name;
 			bool known = allAttributes || !attribute.IsSpecified || name == "xmlns" || name.StartsWith("xmlns:") || name.StartsWith("xml:") ||
-				IsClaimed(attribute.LocalName, attributes) || IsEntryKey(element, name);
+				IsClaimedAttribute(attribute, element.Document.mNamespaces, attributes) || IsEntryKey(element, name);
 			if (!known)
 				return .Err(MakeError(element, position, name, "no field maps this attribute", .UnexpectedContent));
 			position++;
 		}
 		for (let child in element.Children)
 		{
-			if (child.Kind == .Element && !allElements && !IsClaimed(child.LocalName, elements))
+			if (child.Kind == .Element && !allElements && !IsClaimedElement(child, elements))
 				return .Err(MakeError(child, -1, default, "no field maps this element", .UnexpectedContent));
 			if (!text && (child.Kind == .CData || (child.Kind == .Text && !child.IsWhitespace)))
 				return .Err(MakeError(element, -1, default, "no field maps the text in this element", .UnexpectedContent));

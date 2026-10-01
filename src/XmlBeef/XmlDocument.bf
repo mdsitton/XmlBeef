@@ -179,6 +179,8 @@ public class XmlDocument
 	internal List<XmlAttributeStyle> mAttributeStyles ~ delete _;
 	/// While WriteBytes writes: the encoding generated pieces are checked for, and the options saying what
 	/// to do with a character it cannot hold (mFixing: a policy other than failing is active).
+	/// A mutation may have made the namespaces invalid (CheckNamespaces runs before WriteBytes).
+	internal bool mNamespacesChanged;
 	internal bool mFixing;
 	internal XmlEncoding mFixEncoding;
 	internal XmlWriteOptions mFixOptions;
@@ -298,6 +300,7 @@ public class XmlDocument
 		mSubsetItems.Clear();
 		mSubsetOffset = 0;
 		mErrors.Clear();
+		mNamespacesChanged = false;
 		mNamespaces = true;
 		mInputStart = null;
 		mInputEnd = null;

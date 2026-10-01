@@ -12,8 +12,11 @@ public struct XmlMapEntry
 	public XmlValueRef mKey;
 	/// @brief The value's text and where it is (scalars), when mHasValue.
 	public XmlValueRef mValue;
-	/// @brief The element an object value is read from (the entry, or its value element).
+	/// @brief The element an object value is read from (the entry, or its value element; invalid when
+	/// the entry has no value).
 	public XmlNode mElement;
+	/// @brief The entry element itself (invalid for Attributes), whether or not it has a value.
+	public XmlNode mEntry;
 	/// @brief Whether the entry has a value (an Entries value attribute or KeyValueElements value
 	/// element can be missing: the entry is then skipped).
 	public bool mHasValue;
@@ -97,7 +100,7 @@ public struct XmlMapEntries : IEnumerable<XmlMapEntry>
 				switch (mMap.mStyle)
 				{
 				case .KeysAsNames:
-					if (!mMap.mClaimed.IsEmpty && XmlBind.IsClaimed(child.LocalName, mMap.mClaimed))
+					if (XmlBind.IsClaimedElement(child, mMap.mClaimed))
 						continue;
 					if (!mMap.mNamespace.IsEmpty && !XmlBind.IsElement(child, child.LocalName, mMap.mNamespace))
 						continue;
@@ -105,6 +108,7 @@ public struct XmlMapEntries : IEnumerable<XmlMapEntry>
 					entry.mKey = KeyFromName(child);
 					entry.mValue = XmlBind.ElementValue(child);
 					entry.mElement = child;
+					entry.mEntry = child;
 					entry.mHasValue = true;
 					return entry;
 				case .KeyValueElements:
@@ -115,6 +119,7 @@ public struct XmlMapEntries : IEnumerable<XmlMapEntry>
 					XmlMapEntry entry = default;
 					entry.mKey = XmlBind.ElementValue(keyElement);
 					entry.mKey.mName = mMap.mKey;
+					entry.mEntry = child;
 					if (XmlBind.FindElement(child, mMap.mValue, mMap.mNamespace, false, let valueElement) case .Ok(true))
 					{
 						entry.mValue = XmlBind.ElementValue(valueElement);
@@ -134,6 +139,7 @@ public struct XmlMapEntries : IEnumerable<XmlMapEntry>
 					case .Ok:
 					}
 					entry.mElement = child;
+					entry.mEntry = child;
 					if (mMap.mStyle == .Entries && !mMap.mValue.IsEmpty)
 					{
 						if (XmlBind.FindAttribute(child, mMap.mValue, "", false, out entry.mValue) case .Ok(true))
@@ -160,7 +166,7 @@ public struct XmlMapEntries : IEnumerable<XmlMapEntry>
 				StringView name = attribute.Name;
 				if (!attribute.IsSpecified || name == "xmlns" || name.StartsWith("xmlns:") || name.StartsWith("xml:"))
 					continue;
-				if (!mMap.mClaimed.IsEmpty && XmlBind.IsClaimed(attribute.LocalName, mMap.mClaimed))
+				if (!mMap.mClaimed.IsEmpty && XmlBind.IsClaimedAttribute(attribute, mMap.mContainer.Document.mNamespaces, mMap.mClaimed))
 					continue;
 				XmlMapEntry entry = default;
 				entry.mKey.mElement = mMap.mContainer;
@@ -232,22 +238,15 @@ public class XmlMapWriter
 			{
 				// A repeated key: the last one is the one reading used
 				if (style != .Attributes)
-					XmlBind.RemoveWithIndent(EntryOf(earlier.mNode));
-				earlier.mNode = found.mElement;
+					XmlBind.RemoveWithIndent(earlier.mNode);
+				earlier.mNode = found.mEntry;
 				continue;
 			}
 			let added = new Entry();
-			added.mNode = style == .Attributes ? default : found.mElement;
+			// The entry element, with or without a value (one without is completed or removed)
+			added.mNode = style == .Attributes ? default : found.mEntry;
 			mEntries[new String(text)] = added;
 		}
-	}
-
-	/// The entry element (for KeyValueElements, mNode may be the value element: its parent).
-	XmlNode EntryOf(XmlNode node)
-	{
-		if (mStyle == .KeyValueElements && node.IsValid && !XmlBind.IsElement(node, mEntry, mNamespace))
-			return node.Parent;
-		return node;
 	}
 
 	/// @brief Write a scalar value for `key`.
@@ -310,8 +309,8 @@ public class XmlMapWriter
 				continue;
 			if (mStyle == .Attributes)
 				XmlBind.RemoveAttribute(mContainer, pair.key, "");
-			else
-				XmlBind.RemoveWithIndent(EntryOf(pair.value.mNode));
+			else if (pair.value.mNode.IsValid)
+				XmlBind.RemoveWithIndent(pair.value.mNode);
 		}
 	}
 
@@ -342,7 +341,7 @@ public class XmlMapWriter
 		if (mEntries.TryGetValueAlt(key, out entry) && entry.mNode.IsValid)
 		{
 			entry.mUsed = true;
-			XmlNode element = EntryOf(entry.mNode);
+			XmlNode element = entry.mNode;
 			if (XmlBind.IsElement(element, name, namespaceUri))
 				return element;
 			// Another type: a new entry in its place

@@ -141,9 +141,13 @@ extension XmlNode
 			Runtime.FatalError("XmlNode.Rename: only an element or a processing instruction can be renamed");
 		node.mName = mDocument.mNames.Intern(name);
 		node.mFlags |= .Edited;
+		// Its ATTLIST defaults were for the old name: they stay, now as specified attributes
+		if (node.mKind == .Element)
+			mDocument.MaterializeDefaults(mId);
 		if (node.mKind == .Element && mDocument.mNamespaces)
 			node.mNamespace = mDocument.LookupNamespace(mId, mDocument.mNames.PrefixOf(node.mName));
 		mDocument.MarkNode(mId, .NameDirty);
+		mDocument.NamespacesChanged();
 	}
 
 	/// @brief Set the content of text, a CDATA section, a comment, or a processing instruction's data.
@@ -209,6 +213,7 @@ extension XmlNode
 			nameId = attribute.mName;
 		}
 		mDocument.MarkNode(mId, .TagDirty);
+		mDocument.NamespacesChanged();
 		if (IsNamespaceDeclaration(nameId))
 			mDocument.ResolveNamespaces(mId);
 	}
@@ -226,6 +231,7 @@ extension XmlNode
 		XmlNameId nameId = mDocument.mAttributes[index].mName;
 		mDocument.RemoveAttributeAt(mId, index);
 		mDocument.MarkNode(mId, .TagDirty);
+		mDocument.NamespacesChanged();
 		if (IsNamespaceDeclaration(nameId))
 			mDocument.ResolveNamespaces(mId);
 		return true;
@@ -359,7 +365,9 @@ extension XmlNode
 	/// processing instructions, written into its internal subset).
 	void CheckContainer()
 	{
-		if (!IsValid && !(mDocument != null && mId == 0))
+		// The document node too: a handle from before a Clear or Read is stale (DocumentNode gives a
+		// fresh one, valid on an empty document)
+		if (!IsValid)
 			Runtime.FatalError("XmlNode: the handle is invalid (no node, a removed node, or a cleared document)");
 		let kind = mDocument.mNodes[mId].mKind;
 		if (kind != .Element && kind != .Document && kind != .DocType)

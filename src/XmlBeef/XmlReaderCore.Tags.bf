@@ -515,7 +515,26 @@ extension XmlReaderCore<TCursor>
 			attribute.mNamespace = Try!(ResolvePrefix(attribute.mPrefix, false, attribute.mOffset, mNames[attribute.mName].Length));
 			prefixed++;
 		}
-		if (prefixed > 1)
+		if (prefixed > 16)
+		{
+			// Attributes Unique, for many: a set of (namespace, local name), remembering the first
+			mSeenExpanded.Clear();
+			for (int i < mAttributes.Count)
+			{
+				let a = mAttributes[i];
+				if (!a.mPrefix.IsValid)
+					continue;
+				uint64 key = ((uint64)a.mNamespace.mValue << 32) | a.mLocal.mValue;
+				if (mSeenExpanded.TryAdd(key, let keyPtr, let indexPtr))
+				{
+					*indexPtr = (int32)i;
+					continue;
+				}
+				let b = mAttributes[*indexPtr];
+				return .Err(Fail(.DuplicateAttribute, scope $"The attributes `{mNames[b.mName]}` and `{mNames[a.mName]}` have the same namespace and local name", a.mOffset, mNames[a.mName].Length));
+			}
+		}
+		else if (prefixed > 1)
 		{
 			// Attributes Unique: no two with the same namespace and local name
 			for (int i = 1; i < mAttributes.Count; i++)

@@ -36,9 +36,6 @@ internal interface IXmlCursor
 	/// The encoding the document was read in (after Begin).
 	XmlEncoding Encoding { get; }
 
-	/// The input's size in bytes as read (before transcoding), for the entity amplification ratio.
-	int InputBytes { get; }
-
 	/// Whether a UTF-8 byte order mark overrode a declaration of an 8-bit encoding (after Begin).
 	bool BomOverridesDeclaration { get; }
 }
@@ -144,8 +141,6 @@ internal struct XmlByteCursor : IXmlCursor
 	}
 
 	public XmlEncoding Encoding => mEncoding;
-
-	public int InputBytes => mInput.Length;
 
 	public bool BomOverridesDeclaration => mBomOverride;
 

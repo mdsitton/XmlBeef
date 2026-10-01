@@ -135,6 +135,7 @@ extension XmlReaderCore<TCursor>
 		int nameEnd = Try!(ScanName(pos + 1, "a parameter-entity name after `%`"));
 		if (At(nameEnd) != ';')
 			return .Err(Fail(.InvalidReference, scope $"The parameter-entity reference `%{View(pos + 1, nameEnd - pos - 1)}` must end with `;`", pos, nameEnd - pos));
+		Try!(CheckNoColon(pos + 1, nameEnd, "The parameter entity name"));
 		StringView name = View(pos + 1, nameEnd - pos - 1);
 		int end = nameEnd + 1;
 		mPos = end;
@@ -292,6 +293,10 @@ extension XmlReaderCore<TCursor>
 		int p = Try!(RequireSpace(pos + 6, "whitespace after `PUBLIC`"));
 		p = Try!(ReadPubidLiteral(p, out publicId));
 		hasPublic = true;
+		// Kept as an offset: reading on may move a stream's buffer, and the view with it. The views
+		// returned are valid until the caller reads on.
+		int publicStart = (int)(publicId.Ptr - mData);
+		int publicLength = publicId.Length;
 		int ws = SkipSpace(p);
 		char8 c = At(ws);
 		if (c == '"' || c == '\'')
@@ -300,10 +305,10 @@ extension XmlReaderCore<TCursor>
 				return .Err(Fail(.InvalidDeclaration, "Expected whitespace between the public identifier and the system literal", ws));
 			p = Try!(ReadSystemLiteral(ws, out systemId));
 			hasSystem = true;
-			return p;
 		}
-		if (!publicOnly)
+		else if (!publicOnly)
 			return .Err(FailInDeclaration(ws, "the system literal after the public identifier"));
+		publicId = View(publicStart, publicLength);
 		return p;
 	}
 
@@ -480,7 +485,11 @@ extension XmlReaderCore<TCursor>
 					return .Err(FailInDeclaration(p, "a name token in the enumeration"));
 			}
 			else
+			{
+				int nameStart = p;
 				p = Try!(ScanNameInDeclaration(p, "a notation name"));
+				Try!(CheckNoColon(nameStart, p, "The notation name"));
+			}
 			p = SkipSpace(p);
 			char8 c = At(p);
 			if (c == ')')
@@ -530,7 +539,9 @@ extension XmlReaderCore<TCursor>
 				if (c == '|')
 				{
 					p = SkipSpace(p + 1);
+					int nameStart = p;
 					p = Try!(ScanNameInDeclaration(p, "an element name"));
+					Try!(CheckQName(nameStart, p, "The element name"));
 					names = true;
 					continue;
 				}
@@ -561,7 +572,9 @@ extension XmlReaderCore<TCursor>
 					p++;
 					continue;
 				}
+				int itemStart = p;
 				p = Try!(ScanNameInDeclaration(p, "an element name or `(` in the content model"));
+				Try!(CheckQName(itemStart, p, "The element name"));
 				p = SkipOccurrence(p);
 				expectItem = false;
 				continue;

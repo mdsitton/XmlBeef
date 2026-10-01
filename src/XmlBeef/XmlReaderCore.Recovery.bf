@@ -48,6 +48,7 @@ extension XmlReaderCore<TCursor>
 			mBase = outer.mBase;
 			mEnd = outer.mEnd;
 			mPos = outer.mPos;
+			mRetain = outer.mRetain;
 			mFrames.Clear();
 			for (int i < mElements.Count)
 				mElements[i].mFrameLevel = 0;

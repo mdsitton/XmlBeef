@@ -69,6 +69,7 @@ extension XmlReaderCore<TCursor>
 					mTextBuffer.Clear();
 				}
 				mTextBuffer.Append(View(runStart, p - runStart));
+				Try!(CheckTextLength(eventStart));
 				mPos = p;
 				Try!(PopFrame());
 				p = mPos;
@@ -100,6 +101,7 @@ extension XmlReaderCore<TCursor>
 				}
 				mTextBuffer.Append(View(runStart, p - runStart));
 				mTextBuffer.Append('\n');
+				Try!(CheckTextLength(eventStart));
 				p += At(p + 1) == '\n' ? 2 : 1;
 				runStart = p;
 				continue;
@@ -111,6 +113,9 @@ extension XmlReaderCore<TCursor>
 				mTextBuffer.Clear();
 			}
 			mTextBuffer.Append(View(runStart, p - runStart));
+			// The limit holds while decoding, not only for the result: a run of references is not decoded
+			// past it first
+			Try!(CheckTextLength(eventStart));
 			if (At(p + 1) == '#')
 			{
 				p = Try!(ReadCharReference(p, let cp));
@@ -158,6 +163,15 @@ extension XmlReaderCore<TCursor>
 		return TextEvent(mTextBuffer, eventStart, DocEnd(p));
 	}
 
+	/// MaxTextBytes for text being decoded into mTextBuffer, checked as it grows.
+	[Inline]
+	Result<void, XmlFailure> CheckTextLength(int start)
+	{
+		if (mConfig.MaxTextBytes > 0 && mTextBuffer.Length > mConfig.MaxTextBytes)
+			return .Err(Fail(.ResourceLimitExceeded, scope $"A text is longer than MaxTextBytes ({mConfig.MaxTextBytes})", start, 0));
+		return .Ok;
+	}
+
 	/// Reports `value` as a Text event, or nothing when it is empty.
 	[Inline]
 	Result<XmlEvent, XmlFailure> TextEvent(StringView value, int start, int end)
@@ -201,6 +215,8 @@ extension XmlReaderCore<TCursor>
 		int nameEnd = Try!(ScanName(p, "an entity name after `&`"));
 		if (At(nameEnd) != ';')
 			return .Err(Fail(.InvalidReference, scope $"The reference `&{View(p, nameEnd - p)}` must end with `;`", pos, nameEnd - pos));
+		// An entity name has no colon with namespaces, whether or not the entity is ever read
+		Try!(CheckNoColon(p, nameEnd, "The entity name"));
 		return nameEnd;
 	}
 

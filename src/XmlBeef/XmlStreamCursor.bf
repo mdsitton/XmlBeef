@@ -121,14 +121,29 @@ internal struct XmlBufferedStreamCursor : IXmlCursor
 		}
 		if (mState.mHasError)
 			return .Err(mState.MakeError());
-		StringView prefix = .((char8*)mState.mRaw.Ptr, mState.mRaw.Count);
 		XmlDetection detection;
-		switch (XmlEncodingDetector.Detect(prefix, mState.mDeclared, mState.mScratch))
+		while (true)
 		{
-		case .Ok(let found):
-			detection = found;
-		case .Err(let error):
-			return .Err(error);
+			StringView prefix = .((char8*)mState.mRaw.Ptr, mState.mRaw.Count);
+			switch (XmlEncodingDetector.Detect(prefix, mState.mDeclared, mState.mScratch))
+			{
+			case .Ok(let found):
+				detection = found;
+			case .Err(let error):
+				return .Err(error);
+			}
+			// A declaration that goes on past the prefix: more of it, as memory input does
+			if (!detection.mIncomplete || mEof)
+				break;
+			Try!(XmlEncodingDetector.CheckDeclarationLength(mState.mRaw.Count, mConfig));
+			int target = mState.mRaw.Count * 2;
+			while (mState.mRaw.Count < target && !mEof)
+			{
+				if (!ReadRaw(target - mState.mRaw.Count))
+					break;
+			}
+			if (mState.mHasError)
+				return .Err(mState.MakeError());
 		}
 		int start = detection.mUtf8Bom ? 3 : 0;
 		mBomOverride = detection.mBomOverride;
@@ -206,8 +221,8 @@ internal struct XmlBufferedStreamCursor : IXmlCursor
 		mFilled = text.Length;
 		mDone = true;
 		mEof = true;
-		// No token limit can apply to a window that is the whole input
-		mMaxTokenBytes = 0;
+		// The token limit still holds: SetWindow shows no more than MaxTokenBytes from the current
+		// construct, so a longer one comes to Fill's check as from any stream
 		return .Ok;
 	}
 
@@ -409,7 +424,6 @@ internal struct XmlBufferedStreamCursor : IXmlCursor
 
 	public XmlEncoding Encoding => mEncoding;
 
-	public int InputBytes => mBytesRead;
 
 	public bool BomOverridesDeclaration => mBomOverride;
 

@@ -85,10 +85,12 @@ public struct XmlReadConfig
 	/// attribute values (defaulted attributes included), over the whole document. 0 = unlimited.
 	public int MaxEntityExpansionBytes = 10000000;
 	/// @brief Once expansion has produced this many bytes, it may produce at most
-	/// MaxEntityAmplification times the input's size. 0 = the ratio applies from the start.
+	/// MaxEntityAmplification times the document read so far (in UTF-8 bytes, up to the end of the
+	/// reference being expanded). The same from memory and from a stream whatever its buffer; input after
+	/// the reference does not count. 0 = the ratio applies from the start.
 	public int EntityAmplificationThreshold = 1 << 20;
-	/// @brief Maximum ratio of expanded bytes to input bytes past EntityAmplificationThreshold.
-	/// 0 = no ratio.
+	/// @brief Maximum ratio of expanded bytes to the document read so far, past
+	/// EntityAmplificationThreshold. 0 = no ratio.
 	public int MaxEntityAmplification = 10;
 
 	/// @brief Buffer size in bytes for reading a Stream. 0 = default (64 KiB); values below 16 are raised

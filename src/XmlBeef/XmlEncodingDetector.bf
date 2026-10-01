@@ -19,6 +19,9 @@ internal struct XmlDetection
 	public bool mConvert;
 	/// A UTF-8 byte order mark overrode a declaration of another (8-bit) encoding (plan.md §9 item 6).
 	public bool mBomOverride;
+	/// The prefix ended inside the XML declaration before its encoding was known: detect again with
+	/// more of the input (Probe), unless that was all of it.
+	public bool mIncomplete;
 }
 
 /// Encoding detection (XML 1.0 Appendix F, after the author's StrikeCore `DetectEncoding`: byte order
@@ -79,7 +82,7 @@ internal static class XmlEncodingDetector
 		if (n >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF)
 		{
 			detection.mUtf8Bom = true;
-			let name = DeclaredEncoding(prefix.Substring(3));
+			let name = DeclaredEncoding(prefix.Substring(3), out detection.mIncomplete);
 			declared.Set(name);
 			let family = Classify(name, let single);
 			if (family == .Unknown)
@@ -111,7 +114,7 @@ internal static class XmlEncodingDetector
 		}
 
 		// ASCII-compatible: the declaration decides
-		let name = DeclaredEncoding(prefix);
+		let name = DeclaredEncoding(prefix, out detection.mIncomplete);
 		declared.Set(name);
 		switch (Classify(name, let single))
 		{
@@ -146,7 +149,7 @@ internal static class XmlEncodingDetector
 		uint8* dst = (uint8*)scratch.PrepareBuffer(length * 2 + 8);
 		decoder.Decode((uint8*)prefix.Ptr + skip, length, false, dst, length * 2 + 8, let consumed, let produced, let error);
 		scratch.Length = produced;
-		let name = DeclaredEncoding(scratch);
+		let name = DeclaredEncoding(scratch, out detection.mIncomplete);
 		declared.Set(name);
 		bool sixteen = wide == .Utf16LE || wide == .Utf16BE;
 		bool ok;
@@ -204,8 +207,18 @@ internal static class XmlEncodingDetector
 		bomOverride = false;
 		let declared = scope String();
 		let scratch = scope String();
-		// The prefix a stream sees (the declaration is in it), not the whole input: Detect decodes it
-		let detection = Try!(Detect(input.Substring(0, Math.Min(input.Length, cPrefixBytes)), declared, scratch));
+		// The prefix a stream sees, not the whole input (Detect decodes it), grown while the declaration
+		// goes on past it
+		XmlDetection detection;
+		int probe = cPrefixBytes;
+		while (true)
+		{
+			detection = Try!(Detect(input.Substring(0, Math.Min(input.Length, probe)), declared, scratch));
+			if (!detection.mIncomplete || probe >= input.Length)
+				break;
+			Try!(CheckDeclarationLength(probe, config));
+			probe *= 2;
+		}
 		bomOverride = detection.mBomOverride;
 		encoding = detection.mEncoding;
 		if (detection.mUtf8Bom)
@@ -238,6 +251,15 @@ internal static class XmlEncodingDetector
 		return .Ok;
 	}
 
+	/// Detection grows its prefix while the XML declaration goes on (its encoding not yet read), up to
+	/// MaxTokenBytes (the longest construct a stream may hold): past it, an error rather than a guess.
+	public static Result<void, XmlParseError> CheckDeclarationLength(int probed, XmlReadConfig config)
+	{
+		if (config.MaxTokenBytes > 0 && probed >= config.MaxTokenBytes)
+			return .Err(XmlParseError(.ResourceLimitExceeded, scope $"The XML declaration is longer than MaxTokenBytes ({config.MaxTokenBytes}) before its encoding", 1, 1, 0, 5));
+		return .Ok;
+	}
+
 	/// A decoding error at the end of what was decoded (`produced` bytes of `text`), naming the byte for an
 	/// 8-bit encoding.
 	public static XmlParseError DecodeError(StringView error, XmlEncoding encoding, StringView declared, char8 byte, StringView text, int produced)
@@ -267,27 +289,54 @@ internal static class XmlEncodingDetector
 	/// syntax ([81] EncName) is checked here.
 	static StringView DeclaredEncoding(StringView text)
 	{
-		if (!text.StartsWith("<?xml") || text.Length < 6 || !XmlChar.IsSpace(text[5]))
+		return DeclaredEncoding(text, ?);
+	}
+
+	/// The `encoding` of the XML declaration at the start of `text`, or empty. `incomplete`: `text` ended
+	/// inside the declaration before its encoding was known (more input may hold it).
+	static StringView DeclaredEncoding(StringView text, out bool incomplete)
+	{
+		incomplete = false;
+		if (text.Length < 6)
+		{
+			// `<?xml ` itself may be cut off
+			incomplete = !text.IsEmpty && StringView("<?xml ").StartsWith(text);
 			return default;
-		// The declaration ends at its `?>`; search a bounded prefix (pseudo-attributes are short, but
-		// whitespace between them is not limited, so allow plenty)
-		int limit = Math.Min(text.Length, cPrefixBytes);
+		}
+		if (!text.StartsWith("<?xml") || !XmlChar.IsSpace(text[5]))
+			return default;
+		// The declaration ends at its `?>`; pseudo-attributes are short, but the whitespace between them
+		// is not limited: the whole text is searched, and an end before `?>` is incomplete
+		int limit = text.Length;
+		incomplete = true;
 		int i = 5;
-		while (i + 8 <= limit)
+		while (i + 1 < limit)
 		{
 			if (text[i] == '?' && text[i + 1] == '>')
+			{
+				incomplete = false;
 				return default;
+			}
 			if (XmlChar.IsSpace(text[i - 1]) && text.Substring(i).StartsWith("encoding"))
 			{
+				// Running out of text here is incomplete; malformed syntax is the reader's to report
 				int p = i + 8;
 				while (p < limit && XmlChar.IsSpace(text[p]))
 					p++;
-				if (p >= limit || text[p] != '=')
+				if (p >= limit)
+					return default;
+				incomplete = false;
+				if (text[p] != '=')
 					return default;
 				p++;
 				while (p < limit && XmlChar.IsSpace(text[p]))
 					p++;
-				if (p >= limit || (text[p] != '"' && text[p] != '\''))
+				if (p >= limit)
+				{
+					incomplete = true;
+					return default;
+				}
+				if (text[p] != '"' && text[p] != '\'')
 					return default;
 				char8 quote = text[p++];
 				int nameStart = p;
@@ -299,7 +348,12 @@ internal static class XmlEncodingDetector
 						return default;
 					p++;
 				}
-				if (p >= limit || p == nameStart)
+				if (p >= limit)
+				{
+					incomplete = true;
+					return default;
+				}
+				if (p == nameStart)
 					return default;
 				return text.Substring(nameStart, p - nameStart);
 			}

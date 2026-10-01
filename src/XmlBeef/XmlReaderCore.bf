@@ -57,6 +57,9 @@ internal class XmlReaderCoreBase
 		/// Where reading resumes when the frame pops (just after the reference).
 		public int mPos;
 		public int mEnd;
+		/// The retention offset in the outer window (the construct the reference is in): restored with
+		/// the rest, since one set inside the entity is an offset into its replacement text.
+		public int mRetain;
 		public XmlEntity mEntity;
 		/// mElements.Count when the frame was pushed.
 		public int32 mElements;
@@ -148,6 +151,8 @@ internal class XmlReaderCoreBase
 	internal String mAttributeBuffer ~ delete _;
 	internal String mScratch ~ delete _;
 	internal HashSet<XmlNameId> mSeenNames ~ delete _;
+	/// Many prefixed attributes: (namespace, local name) to the first attribute's index.
+	internal Dictionary<uint64, int32> mSeenExpanded ~ delete _;
 	/// The DOCTYPE's name and identifiers (kept while its internal subset is read).
 	internal String mDocTypeName ~ delete _;
 	internal String mDocTypePublicId ~ delete _;
@@ -198,6 +203,7 @@ internal class XmlReaderCoreBase
 		mAttributeBuffer = new .();
 		mScratch = new .();
 		mSeenNames = new .();
+		mSeenExpanded = new .();
 		mDocTypeName = new .();
 		mDocTypePublicId = new .();
 		mDocTypeSystemId = new .();
@@ -568,6 +574,7 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 		frame.mBase = mBase;
 		frame.mPos = resume;
 		frame.mEnd = mEnd;
+		frame.mRetain = mRetain;
 		frame.mEntity = entity;
 		frame.mElements = (int32)mElements.Count;
 		if (mFrames.Count == 0)
@@ -604,6 +611,7 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 		mBase = frame.mBase;
 		mPos = frame.mPos;
 		mEnd = frame.mEnd;
+		mRetain = frame.mRetain;
 		return .Ok;
 	}
 
@@ -613,9 +621,12 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 		mExpandedBytes += bytes;
 		if (mConfig.MaxEntityExpansionBytes > 0 && mExpandedBytes > mConfig.MaxEntityExpansionBytes)
 			return .Err(Fail(.ResourceLimitExceeded, scope $"Entity expansion produces more than MaxEntityExpansionBytes ({mConfig.MaxEntityExpansionBytes})", refStart, refLength));
+		// Against the document read so far, up to the end of the (outermost) reference: the same from
+		// memory and from a stream whatever its buffer, and input after it cannot dilute the ratio
+		int consumed = (mFrames.Count == 0) ? refStart + refLength : mFrames[0].mRefOffset + mFrames[0].mRefLength;
 		if (mConfig.MaxEntityAmplification > 0 && mExpandedBytes > mConfig.EntityAmplificationThreshold &&
-			mExpandedBytes / Math.Max(mCursor.InputBytes, 1) >= mConfig.MaxEntityAmplification)
-			return .Err(Fail(.ResourceLimitExceeded, scope $"Entity expansion produces more than MaxEntityAmplification ({mConfig.MaxEntityAmplification}) times the input's size", refStart, refLength));
+			mExpandedBytes / Math.Max(consumed, 1) >= mConfig.MaxEntityAmplification)
+			return .Err(Fail(.ResourceLimitExceeded, scope $"Entity expansion produces more than MaxEntityAmplification ({mConfig.MaxEntityAmplification}) times the document read up to the reference", refStart, refLength));
 		return .Ok;
 	}
 
