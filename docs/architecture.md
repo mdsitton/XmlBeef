@@ -7,8 +7,9 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 ## 1. Overview
 
 - An XML 1.0 (Fifth Edition) + Namespaces 1.0 library for Beef. Today it has a **pull reader**
-  (`XmlReader`) over bytes in memory and the W3C suite's **canonical form** (`XmlCanonical`). The
-  document, writers, streams, PreserveStyle and typed mapping follow (`plan.md` §6).
+  (`XmlReader`) over bytes in memory, a **document** built on it (`XmlDocument` with `XmlNode`
+  handles, lookups and a canonical writer) and the W3C suite's **canonical form** (`XmlCanonical`).
+  Streams, positions, PreserveStyle, mutation and typed mapping follow (`plan.md` §6).
 - **Strict.** Every well-formedness and namespace constraint is checked; the first error stops the
   read with a located `XmlParseError` (kind, message, line, column in code points, byte offset,
   length, source name).
@@ -23,6 +24,11 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 
 | File (`src/XmlBeef/`) | Responsibility |
 |---|---|
+| `XmlDocument.bf` | `XmlNodeKind`; `XmlDocument`: the node and attribute tables (`XmlNodeRecord`, `XmlAttributeRecord`), the declaration and DOCTYPE fields, `Read`/`ReadBytes`/`ReadFile` (the builder over `XmlReader`), `Clear`, `GetNode` |
+| `XmlDocument.Write.bf` | `XmlWriteOptions`; the canonical writer (`Write`) and its escaping |
+| `XmlNode.bf` | `XmlNodeId`, the `XmlNode` handle (kind, names, value, navigation), `XmlNodeList`, `XmlElementList`, `XmlAttribute`, `XmlAttributeList` |
+| `XmlNode.Lookup.bf` | `Find` (by name, by namespace and local name), attribute lookups and typed getters, `Text`/`AppendText`/`AppendInnerText`, `XmlDescendants`, `XmlValueParser` |
+| `XmlDocumentStore.bf` | Internal: the document's text arena (KdlBeef's pool-recycling `BumpAllocator`) |
 | `XmlReader.bf` | `XmlEvent`; `XmlReader` (public: events, names, namespaces, attributes, DOCTYPE and declaration fields), dispatching to the core |
 | `XmlReaderCore.bf` | `XmlFailure`; `XmlReaderCore<TCursor>`: states and the step loop, prolog/epilog and content steps, entity input frames, expansion accounting, the window helpers, name scanning, `Fail` |
 | `XmlReaderCore.Tags.bf` | Start and end tags, attribute values (normalization, references), ATTLIST defaults and types, namespace binding and resolution, duplicate checks |
@@ -37,9 +43,10 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 | `XmlError.bf`, `XmlReadConfig.bf` | `XmlErrorKind`, `XmlParseError` (KdlBeef's model); `XmlReadConfig`, `XmlMetadataMode`, `XmlDtdMode` |
 
 Tests are in `src/XmlBeef/tests/` (`XmlEdgeCaseTests`: spec-reference §16 one test each;
-`XmlReaderTests`: API, encodings, DTD modes, locations, security and limits). The CLI is
-`XmlTester/src/Program.bf`; the scripts are `test-xml-conformance.sh` (W3C suite, catalogs read by
-`tests/xmlconf/manifest.py`) and `test-leaks.sh`.
+`XmlReaderTests`: API, encodings, DTD modes, locations, security and limits; `XmlDocumentTests`:
+the tree, lookups and the writer). The CLI is `XmlTester/src/Program.bf`; the scripts are
+`test-xml-conformance.sh` (W3C suite in document, events and rewrite modes; catalogs read by
+`tests/xmlconf/manifest.py`), `test-svg-corpus.sh` (the SVG corpora) and `test-leaks.sh`.
 
 ## 3. Reading
 
@@ -150,9 +157,59 @@ unread parameter entity (external or undeclared) ENTITY and ATTLIST declarations
 processed unless standalone (§5.1). `XmlDtdMode.Ignore` checks the DOCTYPE but applies nothing;
 `Prohibit` rejects it.
 
-## 4. The suite's canonical form
+## 4. Document
 
-`XmlCanonical.WriteSuiteForm` drives a reader: start tags with attributes sorted by name bytes,
-start-end pairs, the suite's escapes (`& < > "`, tab, LF, CR) in text and values, PIs as
-`<?target data?>`, and at the DocType event a `<!DOCTYPE root [ … ]>` block of the declared notations
-sorted by name (public identifiers normalized). It reproduces all 262 OUTPUT files of the selection.
+### Nodes are IDs
+
+KdlBeef's model. A node is an `XmlNodeId` into `XmlDocument.mNodes`, a list of `XmlNodeRecord`s:
+kind, flags, name ID, namespace ID, value, attribute range, child count and the links (parent, first
+and last child, next and previous sibling; 0 is none). Record 0 is the document node, whose children
+are the prolog's comments and PIs, the DOCTYPE node, the root element and what follows it; the
+DOCTYPE node's children are the internal subset's PIs (the infoset's DTD item, which the builder
+links when the DocType event comes, after them). `XmlNode` is a 16-byte handle (document, ID,
+generation): the generation changes on every `Clear` and `Read`, so a stale handle is invalid rather
+than showing other content, and the live views (`Children`, `Attributes`, `Named`, `Elements`,
+`Descendants` and their enumerators) check it the same way (`CheckView`). The `Removed` flag is in
+place for mutation (phase 5).
+
+### Names, attributes and text
+
+The document owns an `XmlNameTable` and hands it to its reader (`XmlReader.Reset(…, names)`), so the
+reader interns straight into it: element, attribute, PI-target and entity names are IDs in the node
+and attribute records, with no copy. Attributes are one document-wide table, each element holding a
+start and count (KdlBeef's entries): name, local name and namespace IDs, the value, and a `Defaulted`
+flag for ATTLIST defaults. Lookups scan an element's few attributes comparing names. Text, values and
+the DOCTYPE's identifiers and internal subset are copied into the store (`XmlDocumentStore`, KdlBeef's
+pool-recycling arena). The declaration (version, encoding, standalone) and the notations are document
+fields.
+
+### Lookups
+
+`Find(name)` and `Find(ns, local)` give the first matching child element; `Children.Named`,
+`Children.Elements` and `Descendants` (elements only, depth first, optionally `.Named`) walk the
+links without allocating. Lookups and getters accept the empty handle a failed `Find` returns, so
+chains end in the fallback. Typed attribute getters parse XML's forms, culture-independent:
+`TryGetInt32`/`Int64` (sign and digits, overflow checked), `TryGetDouble` (decimal with fraction and
+exponent, `INF`, `-INF`, `NaN`), `TryGetBool` (`true`, `false`, `1`, `0`), all with surrounding
+whitespace allowed. `Text` joins the node's own Text and CDATA children (a view for a single piece, a
+store copy for several); `AppendInnerText` collects every descendant's text.
+
+## 5. Writing
+
+`XmlDocument.Write` gives the canonical form (plan.md §4.11): the declaration (version as read,
+`encoding="UTF-8"`, standalone if given), the DOCTYPE with its internal subset verbatim (it keeps the
+entity and ATTLIST context, so skipped references are written back as `&name;` and defaulted
+attributes are left to it), comments, PIs (`<?t?>` without data), CDATA sections (split at `]]>`),
+`<a/>` for empty elements, double-quoted attributes. Escaping is minimal: text `&`, `<`, `>` only
+after `]]`, CR as `&#13;`; attributes `&`, `<`, `"` and tab/LF/CR as character references. Each node
+outside the root, and the root, ends a line. `XmlWriteOptions.Indent` indents the children of
+element-only content (whitespace-only text there is replaced) and leaves mixed content, and everything
+inside it, untouched. The walk follows the links, without recursion. Checked by the suite's rewrite
+mode (every accepted case's suite form survives write and re-read) and the corpus script (also a
+fixed point: writing the written document changes nothing).
+
+`XmlCanonical.WriteSuiteForm` produces the suite's form from a reader or from a document: start tags
+with attributes sorted by name bytes, start-end pairs, the suite's escapes (`& < > "`, tab, LF, CR) in
+text and values, PIs as `<?target data?>`, and at the DOCTYPE its PIs and a `<!DOCTYPE root [ … ]>`
+block of the declared notations sorted by name (public identifiers normalized). It reproduces all 262
+OUTPUT files of the selection both ways.

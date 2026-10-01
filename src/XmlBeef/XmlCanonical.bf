@@ -49,49 +49,130 @@ public static class XmlCanonical
 			case .Text, .CData:
 				AppendEscaped(output, reader.Value);
 			case .ProcessingInstruction:
-				output.Append("<?");
-				output.Append(reader.Name);
-				output.Append(' ');
-				output.Append(reader.Value);
-				output.Append("?>");
+				AppendProcessingInstruction(output, reader.Name, reader.Value);
 			case .DocType:
-				let notations = reader.Notations;
-				if (notations.Length == 0)
-					break;
-				output.Append("<!DOCTYPE ");
-				output.Append(reader.Name);
-				output.Append(" [\n");
-				let sorted = scope List<XmlNotation>();
-				sorted.AddRange(notations);
-				sorted.Sort(scope (a, b) => CompareOrdinal(a.mName, b.mName));
-				for (let notation in sorted)
-				{
-					output.Append("<!NOTATION ");
-					output.Append(notation.mName);
-					if (notation.mHasPublicId)
-					{
-						output.Append(" PUBLIC '");
-						output.Append(notation.mPublicId);
-						output.Append('\'');
-						if (notation.mHasSystemId)
-						{
-							output.Append(" '");
-							output.Append(notation.mSystemId);
-							output.Append('\'');
-						}
-					}
-					else
-					{
-						output.Append(" SYSTEM '");
-						output.Append(notation.mSystemId);
-						output.Append('\'');
-					}
-					output.Append(">\n");
-				}
-				output.Append("]>\n");
+				AppendNotations(output, reader.Name, reader.Notations);
 			case .XmlDeclaration, .Comment, .EntityReference:
 			}
 		}
+	}
+
+	/// @brief Write the W3C conformance suite's canonical form of a document (see
+	/// WriteSuiteForm(XmlReader, String)): the same text the reader's events give.
+	/// @param document The document.
+	/// @param output The string to append to.
+	public static void WriteSuiteForm(XmlDocument document, String output)
+	{
+		let nodes = document.mNodes;
+		let names = document.mNames;
+		let order = scope List<int>();
+		for (uint32 top = nodes[0].mFirstChild; top != 0; top = nodes[top].mNextSibling)
+		{
+			ref XmlNodeRecord topNode = ref nodes[top];
+			if (topNode.mKind == .DocType)
+			{
+				for (uint32 pi = topNode.mFirstChild; pi != 0; pi = nodes[pi].mNextSibling)
+					AppendProcessingInstruction(output, names[nodes[pi].mName], nodes[pi].mValue);
+				AppendNotations(output, names[topNode.mName], document.mNotations);
+				continue;
+			}
+			// A subtree, walking the links
+			uint32 id = top;
+			while (true)
+			{
+				ref XmlNodeRecord node = ref nodes[id];
+				switch (node.mKind)
+				{
+				case .Element:
+					output.Append('<');
+					output.Append(names[node.mName]);
+					order.Clear();
+					for (int i = node.mAttributeStart; i < node.mAttributeStart + node.mAttributeCount; i++)
+						order.Add(i);
+					order.Sort(scope (a, b) => CompareOrdinal(names[document.mAttributes[a].mName], names[document.mAttributes[b].mName]));
+					for (let index in order)
+					{
+						output.Append(' ');
+						output.Append(names[document.mAttributes[index].mName]);
+						output.Append("=\"");
+						AppendEscaped(output, document.mAttributes[index].mValue);
+						output.Append('"');
+					}
+					output.Append('>');
+					if (node.mFirstChild != 0)
+					{
+						id = node.mFirstChild;
+						continue;
+					}
+					output.Append("</");
+					output.Append(names[node.mName]);
+					output.Append('>');
+				case .Text, .CData:
+					AppendEscaped(output, node.mValue);
+				case .ProcessingInstruction:
+					AppendProcessingInstruction(output, names[node.mName], node.mValue);
+				default:
+				}
+				// Next: the sibling, or the end tags of the elements this was the last child of
+				while (id != top && nodes[id].mNextSibling == 0)
+				{
+					id = nodes[id].mParent;
+					output.Append("</");
+					output.Append(names[nodes[id].mName]);
+					output.Append('>');
+				}
+				if (id == top)
+					break;
+				id = nodes[id].mNextSibling;
+			}
+		}
+	}
+
+	static void AppendProcessingInstruction(String output, StringView target, StringView data)
+	{
+		output.Append("<?");
+		output.Append(target);
+		output.Append(' ');
+		output.Append(data);
+		output.Append("?>");
+	}
+
+	/// Sun's notation block: `<!DOCTYPE root [` and the notations sorted by name, or nothing without any.
+	static void AppendNotations(String output, StringView root, Span<XmlNotation> notations)
+	{
+		if (notations.Length == 0)
+			return;
+		output.Append("<!DOCTYPE ");
+		output.Append(root);
+		output.Append(" [\n");
+		let sorted = scope List<XmlNotation>();
+		sorted.AddRange(notations);
+		sorted.Sort(scope (a, b) => CompareOrdinal(a.mName, b.mName));
+		for (let notation in sorted)
+		{
+			output.Append("<!NOTATION ");
+			output.Append(notation.mName);
+			if (notation.mHasPublicId)
+			{
+				output.Append(" PUBLIC '");
+				output.Append(notation.mPublicId);
+				output.Append('\'');
+				if (notation.mHasSystemId)
+				{
+					output.Append(" '");
+					output.Append(notation.mSystemId);
+					output.Append('\'');
+				}
+			}
+			else
+			{
+				output.Append(" SYSTEM '");
+				output.Append(notation.mSystemId);
+				output.Append('\'');
+			}
+			output.Append(">\n");
+		}
+		output.Append("]>\n");
 	}
 
 	/// Byte order, which for UTF-8 is code point order.

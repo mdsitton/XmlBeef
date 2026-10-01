@@ -1,0 +1,2 @@
+# SVG corpus files that fail deliberately (path under tests/suites<TAB>reason); see test-svg-corpus.sh.
+resvg/crates/resvg/tests/tests/structure/svg/not-UTF-8-encoding.svg	declares Windows-1251: the single-byte encoding tables are phase 4 (plan.md §6)

@@ -402,7 +402,10 @@ entities, namespaces); `XmlReader` events; `XmlTester` prints the suite's canoni
 `test-xml-conformance.sh` reads the catalogs (`test-suites.md` §9). Done when the 951 not-wf cases are
 rejected, the 957 accepted, and the 262 canonical outputs match.
 
-**Phase 2 — Document and canonical writer.** Store, name table, node table, attributes, the builder
+**Phase 2 — Document and canonical writer.** *Done (2026-09-30): the suite passes in document,
+events and rewrite modes (the rewrite mode checks the writer on every accepted case); 2,389 of the
+2,390 corpus SVGs pass, the Windows-1251 one waiting for phase 4. The document adopts the reader's
+name table; DOCTYPE processing instructions are the DOCTYPE node's children.* Store, name table, node table, attributes, the builder
 over reader events, canonical writer, lookups; `XmlTester` reads through the document (events kept as
 a second mode, both checked by the script); `test-svg-corpus.sh` over the 2,389 SVGs.
 

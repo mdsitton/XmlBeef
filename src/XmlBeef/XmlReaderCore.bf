@@ -127,7 +127,9 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 	/// An empty element's EndElement is due.
 	bool mPendingEnd;
 
-	internal XmlNameTable mNames ~ delete _;
+	/// The names: the reader's own table, or a document's (which then owns them, and clears it).
+	XmlNameTable mOwnNames ~ delete _;
+	internal XmlNameTable mNames;
 	internal XmlDtd mDtd ~ delete _;
 	String mTextBuffer ~ delete _;
 	String mAttributeBuffer ~ delete _;
@@ -175,7 +177,8 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 		mElements = new .();
 		mFrames = new .();
 		mBindings = new .();
-		mNames = new .();
+		mOwnNames = new .();
+		mNames = mOwnNames;
 		mDtd = new .();
 		mTextBuffer = new .();
 		mAttributeBuffer = new .();
@@ -188,7 +191,9 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 		mConfig = .();
 	}
 
-	public void Reset(TCursor cursor, XmlReadConfig config)
+	/// Starts a read. `names`: a table to intern into (a document's, already cleared by it); null for
+	/// the reader's own, which is cleared.
+	public void Reset(TCursor cursor, XmlReadConfig config, XmlNameTable names = null)
 	{
 		mCursor = cursor;
 		mConfig = config;
@@ -202,7 +207,7 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 		mContentStart = 0;
 		mSeenDocType = false;
 		mDocTypeStart = 0;
-		mSubsetStart = 0;
+		mSubsetStart = -1;
 		for (let frame in mFrames)
 			frame.mEntity.mExpanding = false;
 		mElements.Clear();
@@ -210,7 +215,9 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 		mBindings.Clear();
 		mBindingsToPop = -1;
 		mPendingEnd = false;
-		mNames.Clear();
+		mNames = names ?? mOwnNames;
+		if (names == null)
+			mNames.Clear();
 		mDtd.Clear();
 		mAttributes.Clear();
 		mNameId = .None;
@@ -252,6 +259,13 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 
 	/// Whether the read has stopped at an error.
 	public bool IsStopped => mState == .Failed;
+
+	/// Whether the reader is inside the DOCTYPE's internal subset (a ProcessingInstruction event there
+	/// belongs to the DOCTYPE).
+	public bool InDocType => mState == .InternalSubset;
+
+	/// DocType: whether it has an internal subset (`[…]`, possibly empty).
+	public bool HasInternalSubset => mSubsetStart >= 0;
 
 	internal XmlParseError Error => mError;
 

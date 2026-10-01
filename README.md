@@ -4,10 +4,11 @@ An XML 1.0 (Fifth Edition) + Namespaces parser and writer for the [Beef](https:/
 programming language, for reading data formats from disk (SVG first) fast, fully checked and with
 located errors. The sibling of [TomlBeef](https://github.com/mdsitton/TomlBeef) and KdlBeef.
 
-**Status: phase 1 of 7.** The pull reader (`XmlReader`) passes the W3C XML Conformance Test Suite's
-XML 1.0 Fifth Edition + Namespaces selection (957 accepted, 950 of 951 rejected, the one a deliberate
-encoding-conflict choice, and all 262 canonical outputs). The document model, writers, streams and
-typed mapping are next. The plan, requirements and research are in `docs/`:
+**Status: phase 2 of 7.** The pull reader (`XmlReader`) and the document (`XmlDocument`) pass the
+W3C XML Conformance Test Suite's XML 1.0 Fifth Edition + Namespaces selection (957 accepted, 950 of
+951 rejected, the one a deliberate encoding-conflict choice, and all 262 canonical outputs), and read
+2,389 of the 2,390 SVGs of the W3C and resvg corpora. Speed work, streams, style-preserving writes
+and typed mapping are next. The plan, requirements and research are in `docs/`:
 
 - [`docs/plan.md`](docs/plan.md) — requirements, design, phases, open questions
 - [`docs/architecture.md`](docs/architecture.md) — how it works

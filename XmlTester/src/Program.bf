@@ -8,25 +8,45 @@ namespace XmlTester;
 /// Command-line harness for the conformance suites and benchmarks (see docs/plan.md and
 /// docs/test-suites.md §9.1).
 ///
-///   XmlTester [-no-ns] [-events] [-canonical] [file]
+///   XmlTester [-no-ns] [-events | -rewrite] [-canonical] [file]
 ///       read XML from `file` (or stdin) and print the W3C suite's canonical form (James Clark's, with
 ///       Sun's notation block) to stdout; exit 1 with `line:column: message` on stderr if it is not
 ///       well-formed. `-no-ns` turns namespace processing off (the suite's NAMESPACE="no" cases).
-///       `-events` formats straight from the XmlReader's events (the only mode until the document
-///       exists); `-canonical` is accepted for the scripts and is the default.
-///   Exit status: 0 well-formed, 1 not well-formed, 2 usage or I/O error.
+///       By default through an XmlDocument; `-events` formats straight from the XmlReader's events;
+///       `-rewrite` writes the document in canonical form, reads that back into a new document and
+///       prints its suite form (the writer must keep the infoset). `-canonical` is accepted for the
+///       scripts and is the default output.
+///   XmlTester [-no-ns] -write [-indent N] [file]
+///       print the document in canonical form (XmlDocument.Write), indented by N spaces if given.
+///   Exit status: 0 well-formed, 1 not well-formed, 2 usage or I/O error, 3 the rewritten document
+///   was rejected.
 class Program
 {
 	public static int Main(String[] args)
 	{
 		bool namespaces = true;
+		bool events = false;
+		bool rewrite = false;
+		bool write = false;
+		int indent = 0;
 		String path = null;
 		for (int i < args.Count)
 		{
 			let arg = args[i];
 			if (arg == "-no-ns")
 				namespaces = false;
-			else if (arg == "-events" || arg == "-canonical")
+			else if (arg == "-events")
+				events = true;
+			else if (arg == "-rewrite")
+				rewrite = true;
+			else if (arg == "-write")
+				write = true;
+			else if (arg == "-indent" && i + 1 < args.Count && int.Parse(args[i + 1]) case .Ok(let n))
+			{
+				indent = n;
+				i++;
+			}
+			else if (arg == "-canonical")
 			{
 			}
 			else if (arg.StartsWith('-'))
@@ -52,15 +72,49 @@ class Program
 			Console.Error.WriteLine("XmlTester: cannot read stdin");
 			return 2;
 		}
+		StringView input = .((char8*)bytes.Ptr, bytes.Count);
 
 		var config = XmlReadConfig();
 		config.Namespaces = namespaces;
-		let reader = scope XmlReader(StringView((char8*)bytes.Ptr, bytes.Count), config);
 		let output = scope String();
-		if (XmlCanonical.WriteSuiteForm(reader, output) case .Err(let error))
+		if (events)
 		{
-			Console.Error.WriteLine(error.ToString(.. scope .()));
-			return 1;
+			let reader = scope XmlReader(input, config);
+			if (XmlCanonical.WriteSuiteForm(reader, output) case .Err(let error))
+			{
+				Console.Error.WriteLine(error.ToString(.. scope .()));
+				return 1;
+			}
+		}
+		else
+		{
+			let doc = scope XmlDocument();
+			if (doc.Read(input, config) case .Err(let error))
+			{
+				Console.Error.WriteLine(error.ToString(.. scope .()));
+				return 1;
+			}
+			if (write)
+			{
+				var options = XmlWriteOptions();
+				options.Indent = scope String()..Append(' ', indent);
+				doc.Write(output, options);
+			}
+			else if (rewrite)
+			{
+				let written = scope String();
+				doc.Write(written);
+				let again = scope XmlDocument();
+				if (again.Read(written, config) case .Err(let error))
+				{
+					Console.Error.WriteLine(scope $"the canonical form was rejected: {error}");
+					Console.Error.WriteLine(written);
+					return 3;
+				}
+				XmlCanonical.WriteSuiteForm(again, output);
+			}
+			else
+				XmlCanonical.WriteSuiteForm(doc, output);
 		}
 		Console.Out.Write(output);
 		Console.Out.Flush();

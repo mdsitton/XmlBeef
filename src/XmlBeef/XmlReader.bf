@@ -112,6 +112,20 @@ public class XmlReader
 		Reset(StringView((char8*)input.Ptr, input.Length), config);
 	}
 
+	/// Starts a read that interns names into `names` (a document's, cleared by it), not the reader's own.
+	internal void Reset(StringView input, XmlReadConfig config, XmlNameTable names)
+	{
+		mTranscoded.Clear();
+		mBytes.Reset(XmlByteCursor(input, mTranscoded, config), config, names);
+	}
+
+	/// The table the event's names are interned in.
+	internal XmlNameTable Names => mBytes.mNames;
+
+	/// @brief ProcessingInstruction: whether it is inside the DOCTYPE's internal subset (reported before
+	/// the DocType event, which comes at the DOCTYPE's end).
+	public bool IsInDocType => mBytes.InDocType;
+
 	/// @brief Read up to the next event.
 	/// @return The event, or the read's error (see IsStopped).
 	[Inline]
@@ -187,6 +201,8 @@ public class XmlReader
 	public bool HasSystemId => mBytes.mHasSystemId;
 	/// @brief DocType: the internal subset's text between `[` and `]`, empty if none.
 	public StringView InternalSubset => mBytes.mInternalSubset;
+	/// @brief DocType: whether it has an internal subset (`[…]`, possibly empty).
+	public bool HasInternalSubset => mBytes.HasInternalSubset;
 	/// @brief The notations declared in the internal subset, in declaration order (from DocType on).
 	public Span<XmlNotation> Notations => mBytes.mDtd.mNotations;
 
@@ -203,6 +219,16 @@ public class XmlReader
 	/// @param index 0 ..< AttributeCount.
 	/// @return The name's ID.
 	public XmlNameId AttributeNameId(int index) => mBytes.mAttributes[index].mName;
+
+	/// An attribute's interned local name (its name when it has no prefix or without namespaces).
+	internal XmlNameId AttributeLocalId(int index)
+	{
+		let attribute = mBytes.mAttributes[index];
+		return attribute.mLocal.IsValid ? attribute.mLocal : attribute.mName;
+	}
+
+	/// An attribute's interned namespace (None for no namespace).
+	internal XmlNameId AttributeNamespaceId(int index) => mBytes.mAttributes[index].mNamespace;
 
 	/// @brief StartElement: an attribute's local name (the name itself without a prefix or namespaces).
 	/// @param index 0 ..< AttributeCount.

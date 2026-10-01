@@ -16,8 +16,10 @@
 # listed case that passes (remove it from the list). UPDATE_EXPECTED=1 rewrites the list's IDs from
 # the current failures (keeping known reasons) for review. Details go to test-xml-conformance.log.
 #
-# MODES="events" selects the reading modes (events: XmlCanonical over XmlReader's events; document
-# and stream modes join in later phases).
+# Every case runs in each of MODES (default "document events rewrite"): document reads through an
+# XmlDocument; events formats straight from XmlReader's events; rewrite writes the document in
+# canonical form, reads that back and checks its suite form (the writer must keep the infoset; exit 3
+# if the rewrite is rejected). The stream mode joins in phase 4.
 #
 # Fetch the suite first with tests/fetch-suites.sh. Needs python3 (tests/xmlconf/manifest.py reads the
 # catalogs until XmlBeef reads external entities itself).
@@ -72,9 +74,10 @@ fi
 
 failed=0
 declare -A failures
-for mode in ${MODES:-events}; do
+for mode in ${MODES:-document events rewrite}; do
 	flag=""
 	[ "$mode" = events ] && flag="-events"
+	[ "$mode" = rewrite ] && flag="-rewrite"
 
 	accept_pass=0; accept_total=0
 	reject_pass=0; reject_total=0
@@ -126,7 +129,16 @@ for mode in ${MODES:-events}; do
 			accept_total=$((accept_total + 1))
 			if [ $status -eq 0 ]; then
 				accept_pass=$((accept_pass + 1))
-				if [ -n "$output" ] && [ "$entities" = none ]; then
+				# Rewrite: the infoset survives the canonical writer for every accepted case
+				if [ "$mode" = rewrite ]; then
+					timeout 10 "$BIN" $nsflag -canonical "$uri" > "$tmpdir/direct" 2>/dev/null
+					if ! cmp -s "$tmpdir/out" "$tmpdir/direct"; then
+						ok=0
+						why="REWRITE CHANGED THE CONTENT"
+						cp "$tmpdir/direct" "$tmpdir/expected"
+					fi
+				fi
+				if [ $ok -eq 1 ] && [ -n "$output" ] && [ "$entities" = none ]; then
 					canon_total=$((canon_total + 1))
 					if cmp -s "$tmpdir/out" "$output"; then
 						canon_pass=$((canon_pass + 1))
@@ -183,6 +195,13 @@ for mode in ${MODES:-events}; do
 						head -c 2000 "$output"
 						echo ""
 						echo "Actual:"
+						head -c 2000 "$tmpdir/out"
+						echo ""
+					elif [ "$why" = "REWRITE CHANGED THE CONTENT" ]; then
+						echo "Read directly:"
+						head -c 2000 "$tmpdir/expected"
+						echo ""
+						echo "After the canonical writer:"
 						head -c 2000 "$tmpdir/out"
 						echo ""
 					fi
