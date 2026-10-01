@@ -140,6 +140,23 @@ public class XmlDocument
 	/// are, and only decoded text (references, line ends) is copied into the store.
 	char8* mInputStart;
 	char8* mInputEnd;
+	/// PreserveStyle (XmlDocument.Style.bf): the source text (UTF-8, as the reader's offsets index it),
+	/// whether the input started with a byte order mark, the landmarks outside the nodes, and the
+	/// nodes' and attributes' source pieces (by ID and index; empty otherwise).
+	internal bool mPreserve;
+	internal StringView mSource;
+	internal bool mHasBom;
+	internal int32 mContentStart;
+	internal int32 mDeclarationStart;
+	internal int32 mDeclarationEnd;
+	internal int32 mTailStart;
+	internal List<XmlNodeStyle> mNodeStyles ~ delete _;
+	internal List<XmlAttributeStyle> mAttributeStyles ~ delete _;
+	/// Capture state during a PreserveStyle read: the end of the last construct at the current level,
+	/// and the enclosing levels'.
+	bool mStyleBegun;
+	int32 mLastEnd;
+	List<int32> mStyleEnds ~ delete _;
 	/// The source name of the last read (for errors).
 	internal String mSourceName ~ delete _;
 	/// Changes on every Clear and Read, so handles from before can tell they are stale.
@@ -165,6 +182,9 @@ public class XmlDocument
 		mOrder = new .();
 		mNodeRanges = new .();
 		mAttributeRanges = new .();
+		mNodeStyles = new .();
+		mAttributeStyles = new .();
+		mStyleEnds = new .();
 		mGeneration = 1;
 		mNamespaces = true;
 		XmlNodeRecord document = default;
@@ -241,6 +261,15 @@ public class XmlDocument
 		mNamespaces = true;
 		mInputStart = null;
 		mInputEnd = null;
+		mPreserve = false;
+		mSource = default;
+		mHasBom = false;
+		mContentStart = 0;
+		mDeclarationStart = 0;
+		mDeclarationEnd = 0;
+		mTailStart = 0;
+		mNodeStyles.Clear();
+		mAttributeStyles.Clear();
 		XmlNodeRecord document = default;
 		document.mKind = .Document;
 		mNodes.Add(document);
@@ -280,6 +309,7 @@ public class XmlDocument
 			mInputStart = owned.Ptr;
 			mInputEnd = owned.Ptr + owned.Length;
 		}
+		mHasBom = StartsWithAnyBom(input);
 		mReader.Reset(owned, readerConfig, mNames);
 		return EndRead(Build(mReader, config));
 	}
@@ -300,6 +330,18 @@ public class XmlDocument
 	/// @return .Ok, or the first error (IoError if reading fails); the document is then empty.
 	public Result<void, XmlParseError> Read(Stream stream, XmlReadConfig config)
 	{
+		if (config.MetadataMode == .PreserveStyle)
+		{
+			// The document keeps the whole source text anyway: read it all, then as memory input
+			let bytes = scope List<uint8>();
+			if (ReadStreamBytes(stream, config.MaxInputBytes, bytes) case .Err(var error))
+			{
+				Clear();
+				error.SetSource(config.SourceName);
+				return .Err(error);
+			}
+			return Read(StringView((char8*)bytes.Ptr, bytes.Count), config);
+		}
 		let readerConfig = BeginRead(config);
 		mReader.Reset(stream, readerConfig, mNames);
 		return EndRead(Build(mReader, config));
@@ -400,12 +442,18 @@ public class XmlDocument
 		if (maxInputBytes > 0 && size > maxInputBytes)
 			return .Err(XmlParseError(.ResourceLimitExceeded, scope $"The input ({size} bytes) exceeds MaxInputBytes ({maxInputBytes})", 1, 1, 0, 0));
 		// The expected size in one read (plus a byte to see the end), then more if the file grew
-		int chunk = (int)size + 1;
+		return ReadStreamBytes(file, maxInputBytes, bytes, (int)size + 1);
+	}
+
+	/// Reads a stream to its end into `bytes`, failing past `maxInputBytes` (0: no limit).
+	static Result<void, XmlParseError> ReadStreamBytes(Stream stream, int maxInputBytes, List<uint8> bytes, int firstChunk = 65536)
+	{
+		int chunk = firstChunk;
 		while (true)
 		{
 			int filled = bytes.Count;
 			bytes.Count = filled + chunk;
-			switch (file.TryRead(.(bytes.Ptr + filled, chunk)))
+			switch (stream.TryRead(.(bytes.Ptr + filled, chunk)))
 			{
 			case .Ok(let read):
 				bytes.Count = filled + Math.Max(read, 0);
@@ -416,7 +464,7 @@ public class XmlDocument
 				chunk = Math.Max(chunk - read, 4096);
 			case .Err:
 				bytes.Count = filled;
-				return .Err(XmlParseError(.IoError, "Cannot read the file", 0, 0, 0, 0));
+				return .Err(XmlParseError(.IoError, "Cannot read the input", 0, 0, 0, 0));
 			}
 		}
 	}
@@ -424,36 +472,56 @@ public class XmlDocument
 	/// Turns the reader's events into records.
 	Result<void, XmlParseError> Build(XmlReader reader, XmlReadConfig config)
 	{
+		switch (config.MetadataMode)
+		{
+		case .None: return Build<const 0>(reader, config);
+		case .Positions: return Build<const 1>(reader, config);
+		case .PreserveStyle: return Build<const 2>(reader, config);
+		}
+	}
+
+	/// Build for one metadata mode (the XmlMetadataMode as a number), so a read without metadata has
+	/// none of its work in the loop.
+	Result<void, XmlParseError> Build<CMode>(XmlReader reader, XmlReadConfig config) where CMode : const int
+	{
 		mNamespaces = config.Namespaces;
 		mNodeStack.Clear();
 		mPendingDocTypeNodes.Clear();
-		bool positions = config.MetadataMode != .None;
+		const bool positions = CMode != 0;
+		const bool preserve = CMode == 2;
+		mPreserve = preserve;
+		mStyleBegun = false;
+		mStyleEnds.Clear();
 		uint32 current = 0;
 		while (true)
 		{
 			let event = Try!(reader.Next());
 			int nodesBefore = mNodes.Count;
+			// The event's fields, read straight from the core (it changes only on Reset)
+			XmlReaderCoreBase core = reader.Core;
 			switch (event)
 			{
 			case .StartElement:
 				uint32 id = NewNode(.Element);
 				ref XmlNodeRecord element = ref mNodes[id];
-				element.mName = reader.NameId;
-				element.mNamespace = reader.NamespaceId;
-				if (reader.IsEmptyElement)
+				element.mName = core.mNameId;
+				element.mNamespace = core.mNamespace;
+				if (core.mIsEmpty)
 					element.mFlags = .EmptyTag;
-				int count = reader.AttributeCount;
+				int count = core.mAttributes.Count;
 				element.mAttributeStart = (int32)mAttributes.Count;
 				element.mAttributeCount = (int32)count;
 				XmlAttributeRecord* attributes = mAttributes.GrowUninitialized(count);
+				XmlReaderCoreBase.AttributeRecord* read = core.mAttributes.Span.Ptr;
 				for (int i < count)
 				{
 					XmlAttributeRecord* attribute = &attributes[i];
-					attribute.mName = reader.AttributeNameId(i);
-					attribute.mLocal = reader.AttributeLocalId(i);
-					attribute.mNamespace = reader.AttributeNamespaceId(i);
-					attribute.mValue = Own(reader.AttributeValue(i));
-					attribute.mFlags = reader.IsAttributeSpecified(i) ? .None : .Defaulted;
+					XmlReaderCoreBase.AttributeRecord* source = &read[i];
+					attribute.mName = source.mName;
+					attribute.mLocal = source.mLocal.IsValid ? source.mLocal : source.mName;
+					attribute.mNamespace = source.mNamespace;
+					attribute.mValue = Own(source.mValue);
+					attribute.mFlags = source.mSpecified ? .None : .Defaulted;
 				}
 				if (positions)
 				{
@@ -469,19 +537,23 @@ public class XmlDocument
 				LinkLastChild(current, id);
 				if (current == 0)
 					mRoot = id;
+				if (preserve)
+					CaptureStartElement(reader, id);
 				mNodeStack.Add(current);
 				current = id;
 			case .EndElement:
 				// The element's range runs through its end tag
 				if (positions)
 					mNodeRanges[current].mLength = (int32)(reader.EndOffset - mNodeRanges[current].mOffset);
+				if (preserve)
+					CaptureEndElement(reader, current);
 				current = mNodeStack.PopBack();
 			case .Text:
-				AddValueNode(.Text, reader.Value, current);
+				AddValueNode(.Text, core.mValue, current);
 			case .CData:
-				AddValueNode(.CData, reader.Value, current);
+				AddValueNode(.CData, core.mValue, current);
 			case .Comment:
-				AddValueNode(.Comment, reader.Value, current);
+				AddValueNode(.Comment, core.mValue, current);
 			case .ProcessingInstruction:
 				uint32 id = NewNode(.ProcessingInstruction);
 				mNodes[id].mName = mNames.Intern(reader.Name);
@@ -496,6 +568,8 @@ public class XmlDocument
 				mNodes[id].mName = mNames.Intern(reader.Name);
 				LinkLastChild(current, id);
 			case .XmlDeclaration:
+				if (preserve)
+					CaptureDeclaration(reader);
 				mHasDeclaration = true;
 				mVersion = mStore.NewText(reader.Version);
 				mEncodingName = mStore.NewText(reader.Encoding);
@@ -523,11 +597,21 @@ public class XmlDocument
 			case .EndOfDocument:
 				mEncoding = reader.DocumentEncoding;
 				mEncodingWarning = reader.EncodingWarning;
+				if (preserve)
+				{
+					CaptureBegin(reader);
+					mTailStart = mLastEnd;
+				}
 				return .Ok;
 			}
 			// Text, CDATA, comments, PIs, references, the DOCTYPE: the event's range
 			if (positions && event != .StartElement && mNodes.Count > nodesBefore)
+			{
 				RecordRange(mNodeRanges, (uint32)(mNodes.Count - 1), reader, reader.Offset, reader.EndOffset - reader.Offset);
+				// The DOCTYPE's processing instructions are written with it
+				if (preserve && !(event == .ProcessingInstruction && reader.IsInDocType))
+					CaptureLeaf(reader, (uint32)(mNodes.Count - 1));
+			}
 		}
 	}
 
@@ -539,6 +623,16 @@ public class XmlDocument
 			ranges.Add(default);
 		reader.Locate(offset, let line, let column);
 		ranges[index] = .() { mLine = (int32)line, mColumn = (int32)column, mOffset = (int32)offset, mLength = (int32)length };
+	}
+
+	/// Whether `input` starts with a UTF-8, UTF-16 or UTF-32 byte order mark.
+	static bool StartsWithAnyBom(StringView input)
+	{
+		if (XmlChar.StartsWithBom(input.Ptr, input.Length))
+			return true;
+		if (input.Length >= 2 && (((uint8)input[0] == 0xFE && (uint8)input[1] == 0xFF) || ((uint8)input[0] == 0xFF && (uint8)input[1] == 0xFE)))
+			return true;
+		return input.Length >= 4 && input[0] == 0 && input[1] == 0 && (uint8)input[2] == 0xFE && (uint8)input[3] == 0xFF;
 	}
 
 	/// The recorded source range, if the document was read with positions and the item has one.

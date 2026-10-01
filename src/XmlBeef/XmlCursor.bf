@@ -149,6 +149,9 @@ internal struct XmlByteCursor : IXmlCursor
 
 	public bool BomOverridesDeclaration => mBomOverride;
 
+	/// The UTF-8 text the reader's offsets index (after Begin): the input, or its transcoding.
+	public StringView Text => mText;
+
 	public bool LocatesOnlyForward
 	{
 		[Inline]

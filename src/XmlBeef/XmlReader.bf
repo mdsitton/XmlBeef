@@ -228,6 +228,15 @@ public class XmlReader
 	public int Offset => mCore.mEventOffset;
 	/// @brief Byte offset just past the event's construct.
 	public int EndOffset => mCore.mEventEnd;
+	/// The core reading now, for XmlDocument.Build to read the event's fields without the dispatch of
+	/// the properties (valid until the next Reset).
+	internal XmlReaderCoreBase Core => mCore;
+	/// Whether the event was read from an entity's replacement text (its range is the reference's).
+	internal bool IsInEntity => mCore.mFrames.Count > 0;
+	/// The offset of the first content byte, after a UTF-8 byte order mark (after the first Next).
+	internal int ContentStart => mCore.mContentStart;
+	/// In-memory input: the UTF-8 text the offsets index (the input, or its transcoding).
+	internal StringView SourceText => mStreaming ? default : mBytes.mCursor.Text;
 
 	/// @brief XmlDeclaration: the version as written (`1.0`; any `1.x` is read as 1.0).
 	public StringView Version => mCore.mVersion;

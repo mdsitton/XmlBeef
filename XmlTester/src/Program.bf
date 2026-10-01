@@ -21,6 +21,13 @@ namespace XmlTester;
 ///       document or with -events straight from the reader
 ///   XmlTester [-no-ns] -write [-indent N] [file]
 ///       print the document in canonical form (XmlDocument.Write), indented by N spaces if given.
+///   XmlTester [-no-ns] [-stream N] -roundtrip OUT [file]
+///       read with PreserveStyle and write the document back to the file OUT (XmlDocument.WriteFile:
+///       in its own encoding); test-roundtrip.sh compares OUT with the input byte for byte.
+///   XmlTester [-no-ns] -mutate SEED [file]
+///       read with PreserveStyle, make random edits (Mutate.bf), write the document, and check that the
+///       written text reads back into the edited document; print it. Exit 4 if it reads back
+///       differently.
 ///   XmlTester -bench <document|events> <file-or-dir> <min-samples>
 ///       the bench/compare harness (Bench.bf): the check line, then the median time of a read
 ///   XmlTester -bench-loop <document|events> <file-or-dir> <iterations>
@@ -61,6 +68,8 @@ class Program
 		int indent = 0;
 		int streamBuffer = 0;
 		String path = null;
+		String roundtrip = null;
+		int mutateSeed = -1;
 		for (int i < args.Count)
 		{
 			let arg = args[i];
@@ -85,6 +94,16 @@ class Program
 			else if (arg == "-canonical")
 			{
 			}
+			else if (arg == "-roundtrip" && i + 1 < args.Count)
+			{
+				roundtrip = args[i + 1];
+				i++;
+			}
+			else if (arg == "-mutate" && i + 1 < args.Count && int.Parse(args[i + 1]) case .Ok(let seed))
+			{
+				mutateSeed = seed;
+				i++;
+			}
 			else if (arg.StartsWith('-'))
 			{
 				Console.Error.WriteLine($"XmlTester: unknown option {arg}");
@@ -97,6 +116,8 @@ class Program
 		var config = XmlReadConfig();
 		config.Namespaces = namespaces;
 		config.StreamBufferBytes = streamBuffer;
+		if (roundtrip != null || mutateSeed >= 0)
+			config.MetadataMode = .PreserveStyle;
 
 		// The input: whole in memory, or with -stream N a Stream read through an N-byte buffer
 		let bytes = scope List<uint8>();
@@ -150,6 +171,21 @@ class Program
 			{
 				Console.Error.WriteLine(error.ToString(.. scope .()));
 				return 1;
+			}
+			if (roundtrip != null)
+			{
+				if (doc.WriteFile(roundtrip) case .Err(let writeError))
+				{
+					Console.Error.WriteLine(scope $"cannot write the document: {writeError}");
+					return 2;
+				}
+				return 0;
+			}
+			if (mutateSeed >= 0)
+			{
+				int status = Mutate.Run(doc, config, mutateSeed);
+				Console.Out.Flush();
+				return status;
 			}
 			if (write)
 			{

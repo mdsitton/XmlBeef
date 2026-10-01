@@ -430,7 +430,12 @@ every limit with tests, `Read(Stream)` (all input paths produce identical docume
 UTF-32, the single-byte encoding tables (generated from the WHATWG index files by a script kept in
 the repository), the converter hook and the opt-in fallback.
 
-**Phase 5 — PreserveStyle and mutation.** Sidecar slots of §4.9, preserving writer, mutation API;
+**Phase 5 — PreserveStyle and mutation.** *Done (2026-09-30): the 957 accepted suite inputs and
+2,390 corpus SVGs write back byte for byte in their own encodings, from memory and from a 16-byte
+stream (`test-roundtrip.sh`), and 33,470 runs of random edits read back into the edited documents.
+The sidecar records source offsets per node and attribute rather than copied slices (the document
+keeps the source), and entity references stay references until what they produced changes. See
+`architecture.md` §4.* Sidecar slots of §4.9, preserving writer, mutation API;
 byte-exact round trips of every accepted suite input and every corpus SVG; edits keep neighbors.
 
 **Phase 6 — `[XmlObject]`.** The generator with §4.12's roles; a typed benchmark against quick-xml +

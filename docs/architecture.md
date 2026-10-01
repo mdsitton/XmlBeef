@@ -8,9 +8,9 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 
 - An XML 1.0 (Fifth Edition) + Namespaces 1.0 library for Beef. Today it has a **pull reader**
   (`XmlReader`) over bytes in memory or a `Stream`, a **document** built on it (`XmlDocument` with
-  `XmlNode` handles, lookups, optional source positions and a canonical writer) and the W3C suite's
-  **canonical form** (`XmlCanonical`). PreserveStyle, mutation and typed mapping follow (`plan.md`
-  §6).
+  `XmlNode` handles, lookups, optional source positions, mutation, a canonical writer and a
+  style-preserving one) and the W3C suite's **canonical form** (`XmlCanonical`). Typed mapping
+  follows (`plan.md` §6).
 - **Strict.** Every well-formedness and namespace constraint is checked; the first error stops the
   read with a located `XmlParseError` (kind, message, line, column in code points, byte offset,
   length, source name).
@@ -26,7 +26,11 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 | File (`src/XmlBeef/`) | Responsibility |
 |---|---|
 | `XmlDocument.bf` | `XmlNodeKind`; `XmlDocument`: the node and attribute tables (`XmlNodeRecord`, `XmlAttributeRecord`), the declaration and DOCTYPE fields, `Read`/`ReadBytes`/`ReadFile` (the builder over `XmlReader`), `Clear`, `GetNode` |
-| `XmlDocument.Write.bf` | `XmlWriteOptions`; the canonical writer (`Write`) and its escaping |
+| `XmlDocument.Write.bf` | `XmlWriteOptions`; `Write` (preserving or canonical), the canonical writer (`WriteCanonical`) and its escaping |
+| `XmlDocument.Style.bf` | PreserveStyle: `XmlNodeStyle`/`XmlAttributeStyle` records, capture during a read, change marks, the preserving writer |
+| `XmlDocument.Mutation.bf` | Links, removal, namespace resolution after changes, the attribute table's moves, name/text checks, `WriteBytes`/`WriteFile` |
+| `XmlNode.Mutation.bf` | The public mutation API on `XmlNode` |
+| `XmlEncoder.bf` | UTF-8 text to the document's encoding, for `WriteBytes` |
 | `XmlNode.bf` | `XmlNodeId`, the `XmlNode` handle (kind, names, value, navigation), `XmlNodeList`, `XmlElementList`, `XmlAttribute`, `XmlAttributeList` |
 | `XmlNode.Lookup.bf` | `Find` (by name, by namespace and local name), attribute lookups and typed getters, `Text`/`AppendText`/`AppendInnerText`, `XmlDescendants`, `XmlValueParser` |
 | `XmlDocumentStore.bf` | Internal: the document's text (its copy of the input, decoded values) in an `XmlTextArena` |
@@ -51,7 +55,8 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 Tests are in `src/XmlBeef/tests/` (`XmlEdgeCaseTests`: spec-reference §16 one test each;
 `XmlReaderTests`: API, encodings, DTD modes, locations, security and limits; `XmlDocumentTests`:
 the tree, lookups and the writer; `XmlEncodingTests`, `XmlStreamTests`, `XmlPositionsTests`,
-`XmlFastPathTests`). The CLI is `XmlTester/src/Program.bf`; the scripts are
+`XmlFastPathTests`, `XmlPreserveTests`, `XmlMutationTests`). The CLI is `XmlTester/src/Program.bf`
+(with `Bench.bf` and `Mutate.bf`); the scripts are `test-roundtrip.sh` (PreserveStyle) and
 `test-xml-conformance.sh` (W3C suite in document, events, rewrite, stream and stream-events modes,
 with golden messages; catalogs read by `tests/xmlconf/manifest.py`), `test-svg-corpus.sh` (the SVG
 corpora, also streamed) and `test-leaks.sh`.
@@ -233,8 +238,14 @@ DOCTYPE node's children are the internal subset's PIs (the infoset's DTD item, w
 links when the DocType event comes, after them). `XmlNode` is a 16-byte handle (document, ID,
 generation): the generation changes on every `Clear` and `Read`, so a stale handle is invalid rather
 than showing other content, and the live views (`Children`, `Attributes`, `Named`, `Elements`,
-`Descendants` and their enumerators) check it the same way (`CheckView`). The `Removed` flag is in
-place for mutation (phase 5).
+`Descendants` and their enumerators) check it the same way (`CheckView`). A removed node keeps its
+slot with the `Removed` flag until the document is cleared, so its handles become invalid rather
+than naming another node.
+
+`Build` turns the reader's events into records; it is generic over the metadata mode (a const
+generic), so a read without metadata has no positions or style work in its loop, and it reads the
+event's fields from the reader's core directly (the attribute records by pointer) rather than through
+the dispatching properties.
 
 ### Names, attributes and text
 
@@ -270,6 +281,60 @@ outermost reference. Offsets are in the UTF-8 text read (the transcoded text for
 lines and columns in code points. `XmlNode.TryGetSourceRange` and `XmlAttribute.TryGetSourceRange`
 give an `XmlSourceRange` with the source name. Streams locate forward as the builder goes, so the
 ranges match memory input's exactly.
+
+### Mutation
+
+KdlBeef's handle API (`XmlNode.Mutation.bf`, the table operations in `XmlDocument.Mutation.bf`):
+`AddElement`/`AddText`/`AddCData`/`AddComment`/`AddProcessingInstruction` append a child,
+`InsertElementBefore`/`After` place one, `MoveInto`/`MoveBefore`/`MoveAfter` relink a subtree
+(returning false for impossible moves: into itself, text outside the root, a second root), `Remove`
+marks a subtree removed, `Rename`, `SetValue`, `SetText` (replaces the children), `SetAttribute`
+(a DTD default becomes specified) and `RemoveAttribute`. Names and namespaces stay consistent:
+an element's namespace is resolved from the `xmlns` attributes in scope when it is added, renamed or
+moved, and setting or removing a declaration resolves the subtree under it again. What could not be
+written as well-formed XML (an invalid name or character, `--` in a comment, `?>` in PI data, a
+target `xml`) is a fatal error, as an invalid handle is; `XmlDocument.IsValidName` and `IsValidText`
+check first. Prefixes need only be declared by the time the document is written. An element's
+attributes grow in place when they are the last in the table, else move to its end (the old range is
+a hole until Clear); the side tables (positions, style) move with them.
+
+### PreserveStyle
+
+`XmlMetadataMode.PreserveStyle` keeps the source and where every node and attribute is in it, so
+`Write` gives back the document as it was read and regenerates only what changed. `test-roundtrip.sh`
+checks every accepted suite input and corpus SVG byte for byte (`WriteFile`, in the document's own
+encoding), from memory and through a 16-byte stream, and random edits of each (`XmlTester -mutate`)
+for reading back into the edited document.
+
+- **Source.** The document keeps the UTF-8 text the reader's offsets index: its copy of the input,
+  or the transcoding of a document in another encoding. A stream is read whole first (the source is
+  kept anyway), then read as memory input. Whether the input had a byte order mark is recorded.
+- **Capture** (`XmlDocument.Style.bf`, by node ID and attribute index, in tables that stay empty in
+  other modes). Each node gets its range, the offset where the text before it starts (the end of the
+  previous construct at its level: whitespace in the prolog and epilog; in content all text is a
+  node), and flags. An element also gets the end of its name, of its last attribute, of its start
+  tag, and where its end tag starts; an attribute its range and its value's (between the quotes).
+  The XML declaration and the text after the last node are document landmarks.
+- **Entities.** A node read from an entity's replacement text has the range of the outermost
+  reference (`InEntity`; `EntityTop` for the reference's own products). Siblings whose ranges
+  overlap came from one reference (with the text merged around it) and are `Shared`: they are
+  written as the source once, while none of them changed; a change in one, or a sibling removed,
+  moved or put between them (`GroupDirty`), regenerates them all, which expands the reference. An
+  element from an entity has no tags in the source and is regenerated whole when anything in it
+  changes. References in attribute values stay in the raw value.
+- **Marks.** The mutation API sets `NameDirty`, `ValueDirty`, `TagDirty` (attributes changed),
+  `LeadingDirty` (moved: the text before it belonged to its old place) and, on every ancestor,
+  `SubtreeDirty`, stopping at one already marked.
+- **Writing** (`WritePreserving`) walks the tree without recursion. An unchanged node is the source
+  from its leading text to its end. A changed element keeps what it can: its name and attribute text
+  (a removed attribute takes the space before it; a changed value is regenerated in its original
+  quotes; a new one is laid out like the last one read, on its own line when they are), its
+  `/>` (turned into `>` and an end tag when it gets content) or its end tag. Other changed nodes,
+  and everything new, are written canonically; a new node outside the root starts a line.
+- **Bytes.** `WriteBytes`/`WriteFile` encode the text in the document's encoding (`XmlEncoder`: UTF-16
+  and UTF-32 with surrogate pairs, Latin-1, ASCII, the single-byte tables reversed), the byte order
+  mark coming from U+FEFF; a character the encoding lacks is an error naming it. Canonical documents
+  are written in UTF-8.
 
 ## 5. Writing
 

@@ -16,6 +16,28 @@ public struct XmlWriteOptions
 /// The canonical writer (plan.md §4.11).
 extension XmlDocument
 {
+	/// @brief Append the document as XML text. A document read with XmlMetadataMode.PreserveStyle is
+	/// written as it was read, byte for byte in UTF-8 terms (its byte order mark as U+FEFF, its XML
+	/// declaration as written even when it names another encoding: WriteBytes and WriteFile write it in
+	/// that encoding), with what was changed regenerated and the rest left as it was; any other
+	/// document in canonical form (WriteCanonical).
+	/// @param output The string to append to.
+	public void Write(String output)
+	{
+		if (mPreserve)
+			WritePreserving(output);
+		else
+			WriteCanonical(output, .());
+	}
+
+	/// @brief Append the document as XML text in canonical form with options (see WriteCanonical).
+	/// @param output The string to append to.
+	/// @param options Indentation.
+	public void Write(String output, XmlWriteOptions options)
+	{
+		WriteCanonical(output, options);
+	}
+
 	/// @brief Append the document as XML text in canonical form: UTF-8 (an XML declaration, when the
 	/// document had one, says so), `\n` line ends, double-quoted attributes with minimal escaping, `<a/>`
 	/// for elements without content, the DOCTYPE with its internal subset as written, comments,
@@ -23,15 +45,8 @@ extension XmlDocument
 	/// ATTLIST defaults are not written (the internal subset supplies them again). Each node outside the
 	/// root element, and the root, ends a line.
 	/// @param output The string to append to.
-	public void Write(String output)
-	{
-		Write(output, .());
-	}
-
-	/// @brief Append the document as XML text in canonical form (see Write(String)) with options.
-	/// @param output The string to append to.
 	/// @param options Indentation.
-	public void Write(String output, XmlWriteOptions options)
+	public void WriteCanonical(String output, XmlWriteOptions options = .())
 	{
 		if (mHasDeclaration)
 		{
@@ -287,15 +302,24 @@ extension XmlDocument
 	/// references (literal ones would be normalized to spaces).
 	internal static void AppendAttributeEscaped(String output, StringView text)
 	{
+		AppendAttributeEscaped(output, text, '"');
+	}
+
+	/// Attribute values in `quote` (`"` or `'`): `&`, `<` and the quote escaped, and tab, LF and CR as
+	/// character references.
+	internal static void AppendAttributeEscaped(String output, StringView text, char8 quote)
+	{
 		int run = 0;
 		for (int i < text.Length)
 		{
 			StringView escape;
-			switch (text[i])
+			char8 c = text[i];
+			if (c == quote)
+				escape = quote == '"' ? "&quot;" : "&apos;";
+			else switch (c)
 			{
 			case '&': escape = "&amp;";
 			case '<': escape = "&lt;";
-			case '"': escape = "&quot;";
 			case '\t': escape = "&#9;";
 			case '\n': escape = "&#10;";
 			case '\r': escape = "&#13;";

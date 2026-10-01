@@ -204,7 +204,8 @@ internal static class XmlEncodingDetector
 		bomOverride = false;
 		let declared = scope String();
 		let scratch = scope String();
-		let detection = Try!(Detect(input, declared, scratch));
+		// The prefix a stream sees (the declaration is in it), not the whole input: Detect decodes it
+		let detection = Try!(Detect(input.Substring(0, Math.Min(input.Length, cPrefixBytes)), declared, scratch));
 		bomOverride = detection.mBomOverride;
 		encoding = detection.mEncoding;
 		if (detection.mUtf8Bom)
@@ -461,22 +462,36 @@ internal struct XmlDecoder
 		int unit = sixteen ? 2 : 4;
 		while (i + unit <= n && w + 4 <= dstCapacity)
 		{
-			if (mEncoding == .Utf16LE)
+			if (sixteen)
 			{
-				// Runs of ASCII, four units at a time
-				while (i + 8 <= n && w + 4 <= dstCapacity)
+				// Runs of ASCII, four units into one 4-byte store, the bounds checked once per run
+				int words = Math.Min((n - i) >> 3, (dstCapacity - w - 4) >> 2);
+				int k = 0;
+				if (mEncoding == .Utf16LE)
 				{
-					uint64 word = XmlChar.Load64((char8*)b + i);
-					if ((word & 0xFF80FF80FF80FF80UL) != 0)
-						break;
-					dst[w] = (uint8)word;
-					dst[w + 1] = (uint8)(word >> 16);
-					dst[w + 2] = (uint8)(word >> 32);
-					dst[w + 3] = (uint8)(word >> 48);
-					w += 4;
-					i += 8;
+					while (k < words)
+					{
+						uint64 word = XmlChar.Load64((char8*)b + i + k * 8);
+						if ((word & 0xFF80FF80FF80FF80UL) != 0)
+							break;
+						*(uint32*)(dst + w + k * 4) = (uint32)(word & 0xFF) | (uint32)((word >> 8) & 0xFF00) | (uint32)((word >> 16) & 0xFF0000) | (uint32)((word >> 24) & 0xFF000000);
+						k++;
+					}
 				}
-				if (i + unit > n || w + 4 > dstCapacity)
+				else
+				{
+					while (k < words)
+					{
+						uint64 word = XmlChar.Load64((char8*)b + i + k * 8);
+						if ((word & 0x80FF80FF80FF80FFUL) != 0)
+							break;
+						*(uint32*)(dst + w + k * 4) = (uint32)((word >> 8) & 0xFF) | (uint32)((word >> 16) & 0xFF00) | (uint32)((word >> 24) & 0xFF0000) | (uint32)((word >> 32) & 0xFF000000);
+						k++;
+					}
+				}
+				i += k * 8;
+				w += k * 4;
+				if (i + unit > n)
 					break;
 			}
 			uint32 cp;
