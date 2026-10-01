@@ -435,4 +435,24 @@ static class XmlObjectTests
 		Test.Assert(XmlSerializer.Read(output, again) case .Ok);
 		Test.Assert(again.link == "#a" && (again.shapes[1] as TestGroup).children.Count == 1);
 	}
+
+	[Test]
+	public static void Object_ShowGenerated()
+	{
+		let source = TestShown.XmlGeneratedSource;
+		Test.Assert(source.Contains("XmlRead(XmlBeef.XmlNode _node") && source.Contains("XmlWrite(XmlBeef.XmlNode _node"));
+		Test.Assert(source.Contains("\"label\"") && source.Contains("\n\t"));
+		let shown = scope TestShown();
+		Test.Assert(XmlSerializer.Read("<shown label='a \"b\"'/>", shown) case .Ok && shown.label == "a \"b\"");
+	}
+}
+
+[XmlObject(Name = "shown", ShowGenerated = true)]
+class TestShown
+{
+	public String label = new .() ~ delete _;
+
+	public this()
+	{
+	}
 }

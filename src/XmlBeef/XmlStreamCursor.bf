@@ -335,9 +335,16 @@ internal struct XmlBufferedStreamCursor : IXmlCursor
 				drop--;
 			if (drop > 0)
 			{
-				mLines.AdvanceTo((char8*)Buffer - mBase, Math.Max(mBase + drop, mLines.mPos), mBase + mFilled);
-				if (mLocated.mPos < mLines.mPos)
-					mLocated = mLines;
+				// From Locate's count when it is not past the drop (it never is behind mLines): the bytes
+				// before it are not counted again
+				int dropTo = mBase + drop;
+				if (mLocated.mPos <= dropTo)
+				{
+					mLocated.AdvanceTo((char8*)Buffer - mBase, dropTo, mBase + mFilled);
+					mLines = mLocated;
+				}
+				else
+					mLines.AdvanceTo((char8*)Buffer - mBase, Math.Max(dropTo, mLines.mPos), mBase + mFilled);
 				Internal.MemMove(Buffer, Buffer + drop, mFilled - drop);
 				mBase += drop;
 				mFilled -= drop;

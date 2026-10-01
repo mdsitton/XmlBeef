@@ -104,7 +104,8 @@ extension XmlReaderCore<TCursor>
 				attribute.mEnd = (int32)DocEnd(p);
 				continue;
 			}
-			p = Try!(ReadAttributeValue(p, mAttributeBuffer, out attribute.mValue, let bufferStart));
+			// Going on from where the plain text stopped (a stream's window end, after which it refills)
+			p = Try!(ReadAttributeValue(p, mAttributeBuffer, out attribute.mValue, let bufferStart, q));
 			attribute.mBufferStart = (int32)bufferStart;
 			attribute.mBufferLength = bufferStart >= 0 ? (int32)(mAttributeBuffer.Length - bufferStart) : 0;
 			attribute.mEnd = (int32)DocEnd(p);
@@ -188,41 +189,53 @@ extension XmlReaderCore<TCursor>
 		return EndElement(DocOffset(start), DocEnd(p));
 	}
 
+	/// Skips plain attribute-value text from `pos`: words without `quote`, `<`, `&` or a byte below 0x20
+	/// (tab, LF and CR: other controls cannot be in the input) whole, the rest byte by byte, going on
+	/// after a stream's refill. @return The first such byte's offset, or the end of the input.
+	[Inline]
+	int ScanValue(int pos, char8 quote)
+	{
+		int p = pos;
+		while (true)
+		{
+			while (p + 8 <= mEnd)
+			{
+				uint64 word = XmlChar.Load64(mData + p);
+				if ((XmlChar.BytesEqual(word, (uint8)quote) | XmlChar.BytesEqual(word, (uint8)'<') | XmlChar.BytesEqual(word, (uint8)'&') | XmlChar.BytesBelowSpace(word)) != 0)
+					break;
+				p += 8;
+			}
+			while (p < mEnd)
+			{
+				char8 c = mData[p];
+				if (c == quote || c == '<' || c == '&' || (uint8)c < 0x20)
+					return p;
+				p++;
+			}
+			if (!Grow(p, 1))
+				return p;
+		}
+	}
+
 	/// Reads a quoted attribute value at `pos` (its opening quote), normalized (§3.3.3: literal
 	/// whitespace to spaces, references expanded). @return The position after the closing quote; the
 	/// value is `view` (a view of the input: nothing needed decoding, `bufferStart` is -1) or the text
-	/// appended to `buffer` from `bufferStart`.
-	Result<int, XmlFailure> ReadAttributeValue(int pos, String buffer, out StringView view, out int bufferStart)
+	/// appended to `buffer` from `bufferStart`. `plainEnd`, when past the quote, is where plain text
+	/// (without either quote, `<`, `&` or a control) already scanned ends.
+	Result<int, XmlFailure> ReadAttributeValue(int pos, String buffer, out StringView view, out int bufferStart, int plainEnd = 0)
 	{
 		view = default;
 		bufferStart = -1;
 		char8 quote = mData[pos];
-		int p = pos + 1;
-		int runStart = p;
-		// Fast path: plain text up to the quote is a view. Words without the quote, `<`, `&` or a byte
-		// below 0x20 (tab, LF and CR: other controls cannot be in the input) are skipped whole.
-		while (p + 8 <= mEnd)
+		int runStart = pos + 1;
+		// Fast path: plain text up to the quote is a view
+		int p = ScanValue(Math.Max(runStart, plainEnd), quote);
+		if (p < mEnd && mData[p] == quote)
 		{
-			uint64 word = XmlChar.Load64(mData + p);
-			if ((XmlChar.BytesEqual(word, (uint8)quote) | XmlChar.BytesEqual(word, (uint8)'<') | XmlChar.BytesEqual(word, (uint8)'&') | XmlChar.BytesBelowSpace(word)) != 0)
-				break;
-			p += 8;
-		}
-		while (true)
-		{
-			if (p >= mEnd && !Grow(p, 1))
-				break;
-			char8 c = mData[p];
-			if (c == quote)
-			{
-				view = View(runStart, p - runStart);
-				if (mConfig.MaxTextBytes > 0 && view.Length > mConfig.MaxTextBytes)
-					return .Err(Fail(.ResourceLimitExceeded, scope $"An attribute value is longer than MaxTextBytes ({mConfig.MaxTextBytes})", pos, p - pos));
-				return p + 1;
-			}
-			if (c == '<' || c == '&' || c == '\t' || c == '\n' || c == '\r')
-				break;
-			p++;
+			view = View(runStart, p - runStart);
+			if (mConfig.MaxTextBytes > 0 && view.Length > mConfig.MaxTextBytes)
+				return .Err(Fail(.ResourceLimitExceeded, scope $"An attribute value is longer than MaxTextBytes ({mConfig.MaxTextBytes})", pos, p - pos));
+			return p + 1;
 		}
 		bufferStart = buffer.Length;
 		buffer.Append(View(runStart, p - runStart));
@@ -264,16 +277,10 @@ extension XmlReaderCore<TCursor>
 						return .Err(Fail(.ResourceLimitExceeded, scope $"An attribute value is longer than MaxTextBytes ({mConfig.MaxTextBytes})", pos, p - pos));
 					return p;
 				}
-				// A run of plain text (inside replacement text, either quote is data)
+				// A run of plain text (inside replacement text, either quote is data: `<`, a stop anyway,
+				// stands in for it)
 				int run = p;
-				p++;
-				while (Avail(p))
-				{
-					char8 d = mData[p];
-					if (d == '<' || d == '&' || d == '\t' || d == '\n' || d == '\r' || (d == quote && mFrames.Count == level))
-						break;
-					p++;
-				}
+				p = ScanValue(p + 1, mFrames.Count == level ? quote : '<');
 				buffer.Append(View(run, p - run));
 				if (mConfig.MaxTextBytes > 0 && buffer.Length - bufferStart > mConfig.MaxTextBytes)
 					return .Err(Fail(.ResourceLimitExceeded, scope $"An attribute value is longer than MaxTextBytes ({mConfig.MaxTextBytes})", pos, p - pos));

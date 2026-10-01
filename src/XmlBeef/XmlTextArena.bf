@@ -48,7 +48,7 @@ internal class XmlTextArena
 				return;
 			}
 		}
-		int chunkSize = mChunks.IsEmpty ? mFirstSize : Math.Min(mChunks.Back.Count * 2, 1 << 20);
+		int chunkSize = mChunks.IsEmpty ? mFirstSize : Math.Clamp(mChunks.Back.Count * 2, 4096, 1 << 20);
 		let chunk = new uint8[Math.Max(chunkSize, size)];
 		mChunks.Add(chunk);
 		mCurrent = mChunks.Count - 1;
@@ -62,6 +62,41 @@ internal class XmlTextArena
 		mCurrent = -1;
 		mNext = null;
 		mLimit = null;
+	}
+
+	/// @brief Forget everything allocated and free the chunks.
+	public void Release()
+	{
+		Reset();
+		ClearAndDeleteItems!(mChunks);
+		mChunks.Capacity = 0;
+	}
+
+	/// @brief The bytes of every chunk.
+	public int ReservedBytes
+	{
+		get
+		{
+			int total = 0;
+			for (let chunk in mChunks)
+				total += chunk.Count;
+			return total;
+		}
+	}
+
+	/// @brief The bytes of the chunks in use since the last reset: those passed over in full (their
+	/// unused ends included), and the current one up to where it is filled.
+	public int FilledBytes
+	{
+		get
+		{
+			if (mCurrent < 0)
+				return 0;
+			int total = 0;
+			for (int i < mCurrent)
+				total += mChunks[i].Count;
+			return total + (int)(void*)mNext - (int)(void*)mChunks[mCurrent].Ptr;
+		}
 	}
 
 	/// @brief A copy of `text` in the arena.

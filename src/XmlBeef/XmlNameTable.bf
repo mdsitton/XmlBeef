@@ -121,6 +121,20 @@ internal class XmlNameTable
 		AddPredefined();
 	}
 
+	/// @brief Clear, and free the memory the table grew to.
+	public void Release()
+	{
+		mEntries.Count = 1;
+		mEntries.Capacity = 16;
+		delete mSlots;
+		mSlots = new uint64[64];
+		mText.Release();
+		AddPredefined();
+	}
+
+	/// @brief The bytes the table holds (entries, slots, text), approximately.
+	public int ReservedBytes => mEntries.Capacity * strideof(Entry) + mSlots.Count * sizeof(uint64) + mText.ReservedBytes;
+
 	/// A seeded hash of the bytes, read as whole words (overlapping at the end, never past it).
 	[Inline]
 	uint32 Hash(char8* ptr, int length)

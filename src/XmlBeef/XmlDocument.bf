@@ -198,7 +198,6 @@ public class XmlDocument
 	/// Scratch for Read (open elements, the DOCTYPE's processing instructions) and Write.
 	List<uint32> mNodeStack ~ delete _;
 	List<uint32> mPendingDocTypeNodes ~ delete _;
-	internal List<int32> mOrder ~ delete _;
 
 	/// @brief Create an empty document.
 	public this()
@@ -211,7 +210,6 @@ public class XmlDocument
 		mSourceName = new .();
 		mNodeStack = new .();
 		mPendingDocTypeNodes = new .();
-		mOrder = new .();
 		mNodeRanges = new .();
 		mAttributeRanges = new .();
 		mNodeStyles = new .();

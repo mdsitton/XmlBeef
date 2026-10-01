@@ -15,10 +15,15 @@ internal class XmlDocumentStore
 {
 	XmlTextArena mText ~ delete _;
 
-	public this()
+	/// @brief Create a store whose first chunk holds `firstChunkBytes` (later ones double, to 1 MB).
+	/// @param firstChunkBytes The first chunk's size: 64 KiB for reading, the exact size when compacting.
+	public this(int firstChunkBytes = 64 * 1024)
 	{
-		mText = new XmlTextArena(64 * 1024);
+		mText = new XmlTextArena(firstChunkBytes);
 	}
+
+	/// @brief The arena (for its sizes).
+	public XmlTextArena Text => mText;
 
 	/// @brief Copy text into the arena.
 	/// @param text The text to copy.
@@ -33,5 +38,11 @@ internal class XmlDocumentStore
 	public void Reset()
 	{
 		mText.Reset();
+	}
+
+	/// @brief Release all text and free the arena's memory.
+	public void Release()
+	{
+		mText.Release();
 	}
 }

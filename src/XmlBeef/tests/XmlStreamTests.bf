@@ -128,6 +128,81 @@ static class XmlStreamTests
 		Test.Assert(doc.Root.Text == "café" && doc.Encoding == .Windows1252);
 	}
 
+	/// The line and column of byte `offset`, counted one byte at a time: LF, CR and CRLF end a line,
+	/// and every byte but a UTF-8 continuation byte is a column.
+	static void ReferencePosition(StringView text, int offset, out int line, out int column)
+	{
+		line = 1;
+		column = 1;
+		for (int i < offset)
+		{
+			char8 c = text[i];
+			if (c == '\n' || (c == '\r' && (i + 1 >= text.Length || text[i + 1] != '\n')))
+			{
+				line++;
+				column = 1;
+			}
+			else if (c != '\r' && ((uint8)c & 0xC0) != 0x80)
+				column++;
+		}
+	}
+
+	/// Positions are counted a word at a time (XmlLineCounter): the same as one byte at a time, whatever
+	/// mix of multi-byte characters and line ends the words split, from memory and from streams.
+	[Test]
+	public static void Stream_PositionsCountedByWords()
+	{
+		let random = scope Random(7);
+		let pieces = scope StringView[]("a", "bcdefgh", "é", "中", "\u{10000}", "\r\n", "\r", "\n", "  ", "<b/>", "<c>x</c>");
+		for (int round < 300)
+		{
+			let input = scope String("<r>");
+			for (int i < random.Next(40))
+				input.Append(pieces[random.Next(pieces.Count)]);
+			// An error located at its offset, or the unclosed element, located at its start tag
+			bool unclosed = random.Next(2) == 0;
+			input.Append(unclosed ? "<open>" : "&bad;");
+			for (int i < random.Next(20))
+				input.Append(pieces[random.Next(pieces.Count)]);
+			if (!unclosed)
+				input.Append("</r>");
+			let memory = scope XmlDocument();
+			XmlParseError expected = default;
+			if (memory.Read(input) case .Err(let memoryError))
+				expected = memoryError;
+			else
+				Test.FatalError(scope $"`{input}` was accepted");
+			let expectedText = expected.ToString(.. scope .());
+			if (!unclosed)
+			{
+				ReferencePosition(input, expected.mOffset, let line, let column);
+				if (expected.mLine != line || expected.mColumn != column)
+					Test.FatalError(scope $"`{input}`: {expected.mLine}:{expected.mColumn}, counted {line}:{column}");
+			}
+			else
+			{
+				ReferencePosition(input, input.IndexOf("<open>"), let line, let column);
+				if (!expectedText.Contains(scope $"{line}:{column}"))
+					Test.FatalError(scope $"`{input}`: `{expectedText}` does not name {line}:{column}");
+			}
+			for (let buffer in int[](16, 23, 0))
+			{
+				var config = XmlReadConfig();
+				config.StreamBufferBytes = buffer;
+				let doc = scope XmlDocument();
+				switch (doc.Read(scope TrickleStream(input, 5), config))
+				{
+				case .Ok:
+					Test.FatalError(scope $"`{input}` was accepted from a stream");
+				case .Err(let error):
+					let text = error.ToString(.. scope .());
+					if (text != expectedText)
+						Test.FatalError(scope $"`{input}`, buffer {buffer}: from a stream `{text}`, from memory `{expectedText}`");
+				}
+			}
+		}
+	}
+
 	[Test]
 	public static void Stream_ErrorsSameAsMemory()
 	{

@@ -53,9 +53,17 @@ static class Bench
 					sink += XmlChar.FindInvalid((char8*)input.Ptr, 0, input.Count, message, let kind, let length);
 					continue;
 				}
-				reader.Reset(Span<uint8>(input.Ptr, input.Count), config);
+				MemoryStream stream = null;
+				if (mode == "stream")
+				{
+					stream = new MemoryStream(input, false);
+					reader.Reset(stream, config);
+				}
+				else
+					reader.Reset(Span<uint8>(input.Ptr, input.Count), config);
 				while (reader.Next() case .Ok(let event) && event != .EndOfDocument)
 					sink += reader.Value.Length + reader.AttributeCount;
+				delete stream;
 			}
 		}
 		Console.WriteLine($"sink {sink}");

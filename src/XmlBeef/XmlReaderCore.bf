@@ -49,17 +49,26 @@ internal class XmlReaderCoreBase
 		public int32 mColumn;
 	}
 
-	/// A saved window under an entity's replacement text.
-	internal struct InputFrame
+	/// The input window's coordinates (the reader's mData, mBase, mPos, mEnd and mRetain), as an entity
+	/// frame saves and restores them: SaveWindow and RestoreWindow are the one place that lists them.
+	/// Offsets in it are into its own text (the document's, or an entity's replacement text).
+	internal struct InputWindow
 	{
 		public char8* mData;
 		public int mBase;
-		/// Where reading resumes when the frame pops (just after the reference).
 		public int mPos;
 		public int mEnd;
-		/// The retention offset in the outer window (the construct the reference is in): restored with
-		/// the rest, since one set inside the entity is an offset into its replacement text.
+		/// The retention offset (the construct being read): an offset into this window's text, so one set
+		/// inside an entity means nothing outside it.
 		public int mRetain;
+	}
+
+	/// A saved window under an entity's replacement text.
+	internal struct InputFrame
+	{
+		/// The outer window, its mPos where reading resumes when the frame pops (just after the
+		/// reference).
+		public InputWindow mWindow;
 		public XmlEntity mEntity;
 		/// mElements.Count when the frame was pushed.
 		public int32 mElements;
@@ -570,11 +579,8 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 			return .Err(Fail(.ResourceLimitExceeded, scope $"Entity references are nested deeper than MaxEntityDepth ({mConfig.MaxEntityDepth})", refStart, resume - refStart));
 		Try!(CountExpansion(entity.mValue.Length, refStart, resume - refStart));
 		InputFrame frame;
-		frame.mData = mData;
-		frame.mBase = mBase;
-		frame.mPos = resume;
-		frame.mEnd = mEnd;
-		frame.mRetain = mRetain;
+		frame.mWindow = SaveWindow();
+		frame.mWindow.mPos = resume;
 		frame.mEntity = entity;
 		frame.mElements = (int32)mElements.Count;
 		if (mFrames.Count == 0)
@@ -589,11 +595,24 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 		}
 		mFrames.Add(frame);
 		entity.mExpanding = true;
-		mData = entity.mValue.Ptr;
-		mBase = 0;
-		mPos = 0;
-		mEnd = entity.mValue.Length;
+		RestoreWindow(.() { mData = entity.mValue.Ptr, mBase = 0, mPos = 0, mEnd = entity.mValue.Length, mRetain = int.MaxValue });
 		return .Ok;
+	}
+
+	[Inline]
+	InputWindow SaveWindow()
+	{
+		return .() { mData = mData, mBase = mBase, mPos = mPos, mEnd = mEnd, mRetain = mRetain };
+	}
+
+	[Inline]
+	void RestoreWindow(InputWindow window)
+	{
+		mData = window.mData;
+		mBase = window.mBase;
+		mPos = window.mPos;
+		mEnd = window.mEnd;
+		mRetain = window.mRetain;
 	}
 
 	/// Ends the innermost entity's replacement text, which must have closed every element it opened.
@@ -607,11 +626,7 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 		}
 		mFrames.PopBack();
 		frame.mEntity.mExpanding = false;
-		mData = frame.mData;
-		mBase = frame.mBase;
-		mPos = frame.mPos;
-		mEnd = frame.mEnd;
-		mRetain = frame.mRetain;
+		RestoreWindow(frame.mWindow);
 		return .Ok;
 	}
 

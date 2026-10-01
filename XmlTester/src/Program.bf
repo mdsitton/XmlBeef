@@ -37,8 +37,11 @@ namespace XmlTester;
 ///       differently.
 ///   XmlTester -bench <document|events> <file-or-dir> <min-samples>
 ///       the bench/compare harness (Bench.bf): the check line, then the median time of a read
-///   XmlTester -bench-loop <document|events> <file-or-dir> <iterations>
-///       the same operation a fixed number of times, for perf stat and perf record
+///   XmlTester -bench-loop <document|events|stream|typed|validate> <file-or-dir> <iterations> [no-ns] [no-dtd] [buffer=N]
+///       the same operation a fixed number of times, for perf stat and perf record (stream: the
+///       events read from a Stream through a buffer of N bytes, 64 KiB by default)
+///   XmlTester -memory <large-file> <small-file>
+///       what a document holds through long edit sequences, Compact and Clear (Memory.bf)
 ///   Exit status: 0 well-formed, 1 not well-formed, 2 usage or I/O error, 3 the rewritten document
 ///   was rejected.
 class Program
@@ -57,7 +60,7 @@ class Program
 			}
 			if (args[0] == "-bench")
 				return Bench.Run(args[1], args[2], count);
-			// Config variations, to measure what each costs: no-ns, no-dtd
+			// Config variations, to measure what each costs: no-ns, no-dtd, buffer=N (the stream mode's)
 			var config = XmlReadConfig();
 			for (int i = 4; i < args.Count; i++)
 			{
@@ -65,9 +68,13 @@ class Program
 					config.Namespaces = false;
 				else if (args[i] == "no-dtd")
 					config.DtdMode = .Ignore;
+				else if (args[i].StartsWith("buffer=") && int.Parse(args[i].Substring(7)) case .Ok(let size))
+					config.StreamBufferBytes = size;
 			}
 			return Bench.Loop(args[1], args[2], count, config);
 		}
+		if (args.Count == 3 && args[0] == "-memory")
+			return Memory.Run(args[1], args[2]);
 		bool namespaces = true;
 		bool events = false;
 		bool rewrite = false;

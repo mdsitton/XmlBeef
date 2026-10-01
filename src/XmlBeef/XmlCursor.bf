@@ -56,8 +56,28 @@ internal struct XmlLineCounter
 	/// every code point. `text[mPos ..< offset]` must be available, up to `end`.
 	public void AdvanceTo(char8* text, int offset, int end) mut
 	{
+		const uint64 high = 0x8080808080808080UL;
 		while (mPos < offset)
 		{
+			if (mPos + 8 <= offset)
+			{
+				// Eight bytes at a time: a column for each byte that starts a code point (all but the
+				// continuation bytes, 10xxxxxx), up to the first newline
+				uint64 word = XmlChar.Load64(text + mPos);
+				uint64 continuation = word & ~(word << 1) & high;
+				uint64 newlines = XmlChar.BytesEqual(word, (uint8)'\n') | XmlChar.BytesEqual(word, (uint8)'\r');
+				if (newlines == 0)
+				{
+					mColumn += continuation == 0 ? 8 : 8 - XmlChar.CountHighBits(continuation);
+					mPos += 8;
+					continue;
+				}
+				// The bits below the first newline's
+				uint64 before = (newlines & (~newlines + 1)) - 1;
+				int count = XmlChar.CountHighBits(before & high);
+				mColumn += count - XmlChar.CountHighBits(continuation & before);
+				mPos += count;
+			}
 			int newline = XmlChar.NewlineLength(text, mPos, end);
 			if (newline > 0)
 			{
@@ -66,8 +86,10 @@ internal struct XmlLineCounter
 				mColumn = 1;
 				continue;
 			}
-			mPos += Math.Max(XmlChar.Utf8SequenceLength(text[mPos]), 1);
-			mColumn++;
+			// The rest of a sequence the words stopped in takes no column
+			if (((uint8)text[mPos] & 0xC0) != 0x80)
+				mColumn++;
+			mPos++;
 		}
 	}
 }

@@ -59,12 +59,16 @@ public struct XmlObjectAttribute : Attribute, IComptimeTypeApply
 	/// field maps. Namespace declarations and `xml:` attributes are always allowed.
 	public bool Strict;
 
+	/// @brief Also emit the generated code as text, `static StringView XmlGeneratedSource`, to read or
+	/// print when debugging a mapping (the IDE shows emitted code too; the command line does not).
+	public bool ShowGenerated;
+
 	/// @brief Checks the type's fields and emits IXmlSerializable into it.
 	/// @param type The type carrying the attribute.
 	[Comptime]
 	public void ApplyToType(Type type)
 	{
-		XmlSerializerCodeGen.Emit(type, Naming, (Name != null) ? Name : "", (Namespace != null) ? Namespace : "", Strict);
+		XmlSerializerCodeGen.Emit(type, Naming, (Name != null) ? Name : "", (Namespace != null) ? Namespace : "", Strict, ShowGenerated);
 	}
 }
 

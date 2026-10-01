@@ -17,20 +17,23 @@ else
 	inputs=(svg-icons svg-artwork svg-generated records book osm atom book-utf16)
 fi
 
-count() { # mode path iterations
-	perf stat -x, -e instructions:u "$T" -bench-loop "$1" "$2" "$3" 2>&1 > /dev/null | grep instructions | cut -d, -f1
+count() { # "mode [option]" path iterations
+	local mode=${1%% *} options=
+	[ "$mode" != "$1" ] && options=${1#* }
+	perf stat -x, -e instructions:u "$T" -bench-loop "$mode" "$2" "$3" $options 2>&1 > /dev/null | grep instructions | cut -d, -f1
 }
 
-printf '%-14s %8s %9s\n' input events document
+printf '%-14s %8s %9s %8s %8s\n' input events document stream stream4k
 for name in "${inputs[@]}"; do
 	path=bench/compare/inputs/$name
 	[ -f "$path.xml" ] && path=$path.xml
 	bytes=$(du -sb --apparent-size "$path" | cut -f1)
 	line=$(printf '%-14s' "$name")
-	for mode in events document; do
+	# The event pass from a Stream: the default 64 KiB buffer, and a 4 KiB one (more refills)
+	for mode in events document stream "stream buffer=4096"; do
 		# Two runs that differ by five iterations: reading the files and starting up cancel out
-		one=$(count $mode "$path" 1)
-		six=$(count $mode "$path" 6)
+		one=$(count "$mode" "$path" 1)
+		six=$(count "$mode" "$path" 6)
 		line+=$(awk -v a="$one" -v b="$six" -v n="$bytes" 'BEGIN { printf " %8.2f", (b - a) / 5 / n }')
 	done
 	echo "$line"

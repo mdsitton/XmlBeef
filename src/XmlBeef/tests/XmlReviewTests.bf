@@ -369,4 +369,22 @@ static class XmlReviewTests
 		ReadBack(doc, again);
 		Test.Assert(again.Root.TryGetAttribute(XmlNameTable.XmlNamespaceUri, "lang", let lang) && lang == "en");
 	}
+
+	[Test]
+	public static void A04_DiagnosticsOwnTheirText()
+	{
+		let doc = scope XmlDocument();
+		var config = XmlReadConfig();
+		config.SourceName = "first.xml";
+		XmlDiagnostic first = null;
+		if (doc.Read("<a></b>", config) case .Err(let error))
+			first = new XmlDiagnostic(error);
+		defer delete first;
+		let expected = first.Error.ToString(.. scope String());
+		Test.Assert(expected.StartsWith("first.xml:1:"));
+		// The next error replaces the thread's buffers; the diagnostic keeps its own
+		config.SourceName = "second.xml";
+		Test.Assert(doc.Read("<a x='1' x='2'/>", config) case .Err);
+		Test.Assert(first.ToString(.. scope String()) == expected && first.mKind == .MismatchedEndTag);
+	}
 }

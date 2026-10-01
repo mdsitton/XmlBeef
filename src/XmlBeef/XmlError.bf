@@ -90,7 +90,9 @@ public enum XmlErrorKind : uint8
 ///
 /// The error owns nothing and needs no cleanup, so it can be dropped freely (including by `Try!`).
 /// `mMessage` views a per-thread buffer: it stays valid until the next XmlParseError is created on the
-/// same thread, which in practice means the next failing XmlBeef call. Copy it to keep it longer.
+/// same thread, which in practice means the next failing XmlBeef call. To keep one longer, make an
+/// XmlDiagnostic of it (`new XmlDiagnostic(error)`, which owns its text), or copy the message.
+/// (XmlDocument.Errors are an exception: their text belongs to the document.)
 public struct XmlParseError
 {
 	/// Per-thread message and source-name storage, freed when the thread exits.

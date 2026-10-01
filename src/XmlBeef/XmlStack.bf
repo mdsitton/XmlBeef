@@ -72,6 +72,21 @@ internal class XmlStack<T> where T : struct
 		delete old;
 	}
 
+	/// Frees the capacity beyond the items (keeping at least `minimum`).
+	public void TrimExcess(int minimum = 16)
+	{
+		int capacity = Math.Max(mCount, minimum);
+		if (capacity >= mItems.Count)
+			return;
+		T[] old = mItems;
+		mItems = new T[capacity];
+		Internal.MemCpy(mItems.Ptr, old.Ptr, mCount * strideof(T), alignof(T));
+		delete old;
+	}
+
+	/// The bytes of the array.
+	public int ReservedBytes => mItems.Count * strideof(T);
+
 	void Grow()
 	{
 		Reserve(mItems.Count * 2);

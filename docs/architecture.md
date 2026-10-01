@@ -29,10 +29,12 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 | `XmlDocument.Write.bf` | `XmlWriteOptions`; `Write` (preserving or canonical), the canonical writer (`WriteCanonical`) and its escaping |
 | `XmlDocument.Style.bf` | PreserveStyle: `XmlNodeStyle`/`XmlAttributeStyle` records, capture during a read, change marks, the preserving writer |
 | `XmlDocument.Mutation.bf` | Links, removal, namespace resolution after changes, the attribute table's moves, name/text checks, `WriteBytes`/`WriteFile` |
+| `XmlDocument.Compact.bf` | `XmlMemoryUsage`; `MemoryUsage`, `Compact`, `Clear(releaseMemory)` |
 | `XmlNode.Mutation.bf` | The public mutation API on `XmlNode` |
 | `XmlEncoder.bf` | UTF-8 text to the document's encoding, for `WriteBytes` |
 | `XmlObjectAttribute.bf` | `[XmlObject]` and the field attributes, `XmlNaming`, `IXmlSerializable`, `IXmlConverter<T>` |
-| `XmlSerializerCodeGen.bf` | The comptime generator of `[XmlObject]` (§6) |
+| `XmlSerializerPlan.bf` | The comptime generator's planning half: field kinds and roles (`FieldPlan`, `PlanField`, `PlanMap`), the chain's claimed names and conflicts (`ScanChain`), naming and type helpers (§6) |
+| `XmlSerializerCodeGen.bf` | The comptime generator's entry (`Emit`) and emission: the code of `XmlRead`/`XmlWrite` from the plans (§6) |
 | `XmlBind.bf` | The generated code's runtime: `XmlValueRef`, `XmlValueWriter`, the cursors, `XmlBind` |
 | `XmlMap.bf` | Dictionaries' runtime: `XmlMapEntries` (reading), `XmlMapWriter` (writing in place) |
 | `XmlSerializer.bf` | One-call `Read`/`ReadFile`/`Write`/`WriteFile` of whole documents as `[XmlObject]` types |
@@ -57,12 +59,16 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 | `XmlChar.bf` | Name byte classes and the Fifth Edition ranges, `Char`, `S`, PubidChar, UTF-8 decode/encode, `FindInvalid`, line/column |
 | `XmlCanonical.bf` | `XmlCanonical.WriteSuiteForm`: James Clark's canonical XML with Sun's notation block, from events |
 | `XmlError.bf`, `XmlReadConfig.bf` | `XmlErrorKind`, `XmlParseError` (KdlBeef's model); `XmlReadConfig`, `XmlMetadataMode`, `XmlDtdMode` |
+| `XmlDiagnostic.bf` | `XmlDiagnostic`: an error that owns its text (§4 "Lifetimes") |
 
 Tests are in `src/XmlBeef/tests/` (`XmlEdgeCaseTests`: spec-reference §16 one test each;
 `XmlReaderTests`: API, encodings, DTD modes, locations, security and limits; `XmlDocumentTests`:
 the tree, lookups and the writer; `XmlEncodingTests`, `XmlStreamTests`, `XmlPositionsTests`,
-`XmlFastPathTests`, `XmlPreserveTests`, `XmlMutationTests`, `XmlObjectTests`, `XmlCollectTests`). The CLI is `XmlTester/src/Program.bf`
-(with `Bench.bf`, `Mutate.bf` and `Fuzz.bf`); the scripts are `test-roundtrip.sh` (PreserveStyle),
+`XmlFastPathTests`, `XmlPreserveTests`, `XmlMutationTests`, `XmlCompactTests`, `XmlObjectTests`,
+`XmlCollectTests`, and `XmlReviewTests`: one regression per finding of the 2026-10-01 review). The CLI
+is `XmlTester/src/Program.bf` (with `Bench.bf`, `Mutate.bf`, `Fuzz.bf` and `Memory.bf`); the scripts
+are `test-codegen.sh` (the generator's build-time checks: `tests/codegen/` fixtures that must stop the
+build with their message, or build), `test-roundtrip.sh` (PreserveStyle),
 `test-collect.sh` (collect-errors under random damage) and
 `test-xml-conformance.sh` (W3C suite in document, events, rewrite, stream, stream-events, collect and
 stream-collect modes,
@@ -118,7 +124,12 @@ window moves, the core rebases every view it holds (`RebaseViews`: the name, val
 fields, attribute views). Entity frames read stored replacement text, so `Grow` is off inside them
 and the outer window is kept by `mRetain`. Line and column are counted forward only
 (`LocatesOnlyForward`), so positions an error may need later (an open element's start) are located
-when they are read. A stream whose whole input fits in the first read is checked as memory input is,
+when they are read: every start tag counts on to its `<`, which makes the line counter
+(`XmlLineCounter.AdvanceTo`) part of every streamed byte's cost. It counts 8 bytes at a time (a column
+per byte that is not a UTF-8 continuation byte, up to the first CR or LF, which is stepped singly so
+CRLF stays one newline), and `Fill` continues that count to the bytes it drops rather than counting
+them again (review P02: streaming cost 2–5× the in-memory event pass in instructions, now 1.2–1.5×;
+`bench/instructions.sh`'s `stream` and `stream4k` columns). A stream whose whole input fits in the first read is checked as memory input is,
 so both paths give identical first errors: the scripts' stream modes compare every not-wf case's
 message with the golden one.
 
@@ -145,8 +156,11 @@ data. Recursion is caught by an `mExpanding` flag per entity (No Recursion), dep
 against `MaxEntityExpansionBytes` and, past `EntityAmplificationThreshold`, against
 `MaxEntityAmplification` times the document read so far, up to the end of the outermost reference
 (`plan.md` §9 item 9): the same from memory and from a stream whatever its buffer, and input after
-the reference cannot dilute it. An entity frame saves the outer window's retention offset with the
-rest and restores it, since one set inside the entity is relative to its text. ATTLIST defaults built from
+the reference cannot dilute it. The window's coordinates (`mData`, `mBase`, `mPos`, `mEnd`, `mRetain`)
+are one `InputWindow` to a frame: `SaveWindow` and `RestoreWindow` are the one place that lists them,
+used by `PushFrame`, `PopFrame` and collect-errors' unwinding (review A01; R05 was a frame that did
+not restore `mRetain`). Offsets in a window are into its own text, so the retention offset is saved
+and restored with the rest and an entity's window starts with none. ATTLIST defaults built from
 entity references count again each time they are applied. Errors inside an entity are located at
 the outermost reference and name the entity.
 
@@ -219,9 +233,12 @@ intern again; duplicate attributes compare IDs (pairwise up to 16, a set above).
 Phase 3 measured with instruction counts (`bench/instructions.sh`, which load does not distort) and
 `perf`. What paid:
 
-- **Word-at-a-time scans**: text runs stop at `<`, `&`, `]` or CR and attribute values at their quote,
-  `<`, `&` or a byte below 0x20, 8 bytes at a time (`XmlChar.BytesEqual`, `BytesBelowSpace`); the
-  word holding a stop is walked byte by byte (Beef has no trailing-zero-count intrinsic).
+- **Word-at-a-time scans**: text runs stop at `<`, `&`, `]` or CR, attribute values at their quote,
+  `<`, `&` or a byte below 0x20, comments, PIs and CDATA sections at `-`, `?` or `]` and CR, 8 bytes at
+  a time (`XmlChar.BytesEqual`, `BytesBelowSpace`; `ScanText`, `ScanValue`, `ScanUntil`); the word
+  holding a stop, and the window's last bytes, are walked byte by byte (Beef has no trailing-zero-count
+  intrinsic). After a stream's refill the words go on from where the scan was, and a start tag's
+  inline value scan hands its position on to `ReadAttributeValue` (review P02).
 - **Validation**: `FindInvalid` checks 32 bytes per step, also when they hold tab, LF or CR (an LF in
   every 32-byte window of indented text had sent it to the 8-byte path, 5.7 instructions per byte).
 - **What validation guarantees**: after it, a byte up to 0x20 in the window is space, tab, LF or CR,
@@ -285,8 +302,8 @@ links when the DocType event comes, after them). `XmlNode` is a 16-byte handle (
 generation): the generation changes on every `Clear` and `Read`, so a stale handle is invalid rather
 than showing other content, and the live views (`Children`, `Attributes`, `Named`, `Elements`,
 `Descendants` and their enumerators) check it the same way (`CheckView`). A removed node keeps its
-slot with the `Removed` flag until the document is cleared, so its handles become invalid rather
-than naming another node.
+slot with the `Removed` flag until the document is cleared or compacted, so its handles become
+invalid rather than naming another node.
 
 `Build` turns the reader's events into records; it is generic over the metadata mode (a const
 generic), so a read without metadata has no positions or style work in its loop, and it reads the
@@ -363,7 +380,30 @@ PreserveStyle DOCTYPE keeps its own text around the subset. A processing instruc
 entity wrote (`FromEntity`) cannot be changed, since the reference would write it again:
 `XmlNode.IsEditable` tells, and changing one is a fatal error. An element's
 attributes grow in place when they are the last in the table, else move to its end (the old range is
-a hole until Clear); the side tables (positions, style) move with them.
+a hole until Clear or Compact); the side tables (positions, style) move with them.
+
+### Edit dependencies
+
+PreserveStyle's marks are structural: a node, its ancestors, its neighbors. What a node means can also
+depend on things outside its subtree, and each such dependency has one owner that invalidates it
+(review A02). The policy is conservative regeneration (rare edits such as removing the DOCTYPE redo
+more than they strictly must) rather than a dependency graph.
+
+| The document's meaning depends on | Changed by | What happens |
+|---|---|---|
+| ATTLIST defaults and types for an element name | `Rename` of the element | `MaterializeDefaults`: its defaulted attributes become specified |
+| The whole internal subset (defaults, types, entities) | Removing the DOCTYPE | `DocTypeRemoved`: every element's defaults become specified; with PreserveStyle, text and elements an entity produced, attribute values whose source differs from their value, and references to empty entities (no node: only source between nodes) are regenerated or dropped |
+| Namespace declarations in scope | Moving a node, setting or removing an `xmlns` attribute, renaming | `ResolveNamespaces` under the changed element; `mNamespacesChanged`, checked by `CheckNamespaces` before `WriteBytes`/`WriteFile` |
+| Source shared with siblings (an entity reference) | Changing, removing, moving or inserting next to one of them | `GroupDirty`: the group is regenerated, expanding the reference |
+| The enclosing text (CDATA's `]]>`, text's `]]`) | Adjacent nodes | Decided while writing: escaping looks at the output written before (R03), CDATA is split (R10) |
+
+Limits kept (status.md RV-L): removing a specified attribute that has a DTD default lets the default
+come back on reading (XML has no way to say "absent" while the declaration stands); references to
+unread entities stay as written after the DOCTYPE is removed (there is no value to write); a CR in a
+comment or PI reads back as LF (no escape exists). Both writers share the escaping (`AppendTextEscaped`,
+`AppendAttributeEscaped`, the CDATA and subset writers) and the checks made when values are set, so
+what they generate is well-formed in the same way; `CheckNamespaces` works on the document's state, not
+by reparsing output.
 
 ### PreserveStyle
 
@@ -408,6 +448,48 @@ for reading back into the edited document.
   (`FixUnencodable`); what the source kept is in the encoding already, and what a policy cannot fix
   (names, a reference in a comment) is the encoder's error.
 
+### Memory: Compact and Clear(releaseMemory)
+
+Editing keeps history (review P04): `SetValue` and `SetAttribute` copy the new value into the text
+arena and leave the old one, an attribute appended to an element whose attributes are not last in the
+table moves them all to its end, and removed nodes keep their slots. That suits stable views and bulk
+cleanup but lets memory follow the edit history. `MemoryUsage` reports slots and live counts, arena
+bytes reserved, filled and live, and an approximate total. `Compact(newIds)` rebuilds the document
+from what is live: nodes renumbered in document order (handles become invalid, as after `Clear`;
+`newIds` maps old IDs to new), attributes contiguous, the side tables (positions, style, subset items)
+remapped, and the live text copied into a new arena of exactly its size; the kept source (PreserveStyle
+and positions) moves as one block, so offsets and the views into it stay valid. Names stay interned.
+`Clear(true)` frees what `Clear()` keeps for the next read (arena chunks, table capacities, the name
+table's growth, the reader's buffers): after an unusually large document.
+
+`XmlTester -memory records.xml small.svg` (records.xml: 13.8 MB, 912,467 nodes), from the document's
+own accounting (resident memory is the allocator's business):
+
+| Step | Nodes (slots / live) | Attributes (slots / live) | Text (filled / live) | Total |
+|---|---:|---:|---:|---:|
+| Read | 912,467 / 912,467 | 76,518 / 76,518 | 15.2 / 7.7 MB | 85 MB |
+| Every text value replaced 10× | same | same | 41.4 / 7.1 MB | 111 MB |
+| An attribute added on every element, 5× | same | 5,340,603 / 1,703,683 | 43.0 / 8.8 MB | 370 MB |
+| Every other child element of the root removed | 912,467 / 318,049 | 5,340,603 / 604,124 | 43.0 / 2.7 MB | 370 MB |
+| `Compact` | 318,049 / 318,049 | 604,124 / 604,124 | 2.7 / 2.7 MB | 41 MB |
+| (PreserveStyle: after the same edits, then `Compact`) | | | 43.0 → 15.3 MB | 718 → 91 MB |
+| A small document read after records.xml | 3 / 3 | 4 / 4 | 342 bytes of a 15.9 MB arena | 85 MB |
+| `Clear(true)` | 1 / 1 | 0 / 0 | 0 | 2 KB |
+
+### Lifetimes
+
+One contract for everything the document hands out (review A04):
+
+| What | Valid until | Checked |
+|---|---|---|
+| `XmlNode`, `XmlNodeList`, `XmlElementList`, `XmlDescendants`, their enumerators | The document is read again, cleared or compacted (the generation changes), or the node is removed | `IsValid`; a stale list or enumerator is a fatal error (`CheckView`) |
+| `XmlAttribute`, `XmlAttributeList` | The same, or the attribute is removed; it follows its record when the table moves | `IsValid`; reading a stale one is a fatal error |
+| `XmlNodeId` | The same as the node (a number: it never checks itself; `GetNode` does) | `GetNode` returns an invalid handle |
+| Strings the document returns (names, values, `Text`, the DOCTYPE's, `Errors`' messages) | The document is read again, cleared or compacted. A value replaced by `SetValue`/`SetAttribute` stays readable until then | No |
+| Reader event strings (`Name`, `Value`, attribute values) | The next `Next` call | No |
+| `XmlParseError.mMessage`/`mSource` | The next error made on the same thread | No: copy them, or keep an `XmlDiagnostic` |
+| `XmlDiagnostic` | Deleted by its owner | Owns its text |
+
 ## 5. Writing
 
 `XmlDocument.Write` gives the canonical form (plan.md §4.11): the declaration (version as read,
@@ -439,7 +521,13 @@ KdlBeef's `[KdlObject]` design (`plan.md` §4.12) with XML's roles.
   are generated switches over their case names. `ScanChain` collects the chain's claimed names and
   stops the build on conflicts, `PlanField` makes each field's plan (kinds, role, names; every check),
   then the code is written from the plans, so nothing is emitted for a type whose mapping fails. A
-  base's methods are hidden (`new`) and called first.
+  base's methods are hidden (`new`) and called first. Planning and its checks are
+  `XmlSerializerPlan.bf`, emission `XmlSerializerCodeGen.bf` (review A03); the plan (`FieldPlan`) and
+  the claims in Clark notation are what the two share. `[XmlObject(ShowGenerated = true)]` also emits
+  the generated code as `static StringView XmlGeneratedSource`, to print when debugging a mapping
+  from the command line (the IDE shows emitted code itself). The checks that stop the build are
+  tested by `test-codegen.sh`, which builds each fixture of `tests/codegen/` alone (a `[Test]` cannot
+  see a build fail); what the emitted code does is tested by `XmlObjectTests`.
 - **Roles.** Scalars (bool, integers, floats, String, enums, converter types) are attributes;
   `[XmlElement]` makes one a child element's text, `[XmlText]` the element's own text (its Text and
   CDATA children; other children stay when it is written). `[XmlAttribute] List<scalar>` is one

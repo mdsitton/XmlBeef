@@ -20,26 +20,57 @@ extension XmlReaderCore<TCursor>
 		return table;
 	}
 
-	/// Skips plain text from `pos`. @return The first stop byte's offset, or the window's end.
+	/// Skips plain text from `pos`. @return The first stop byte's offset, or the end of the input.
 	[Inline]
 	int ScanText(int pos)
 	{
 		int p = pos;
-		// Words without a stop byte are skipped whole; the one holding it is walked byte by byte
-		while (p + 8 <= mEnd)
-		{
-			uint64 word = XmlChar.Load64(mData + p);
-			if ((XmlChar.BytesEqual(word, (uint8)'<') | XmlChar.BytesEqual(word, (uint8)'&') | XmlChar.BytesEqual(word, (uint8)']') | XmlChar.BytesEqual(word, (uint8)'\r')) != 0)
-				break;
-			p += 8;
-		}
 		while (true)
 		{
-			if (p >= mEnd && !Grow(p, 1))
+			// Words without a stop byte are skipped whole; the one holding it, and the window's last bytes,
+			// are walked byte by byte. After a stream's refill the words go on from there.
+			while (p + 8 <= mEnd)
+			{
+				uint64 word = XmlChar.Load64(mData + p);
+				if ((XmlChar.BytesEqual(word, (uint8)'<') | XmlChar.BytesEqual(word, (uint8)'&') | XmlChar.BytesEqual(word, (uint8)']') | XmlChar.BytesEqual(word, (uint8)'\r')) != 0)
+					break;
+				p += 8;
+			}
+			while (p < mEnd)
+			{
+				if (sTextStop[(uint8)mData[p]])
+					return p;
+				p++;
+			}
+			if (!Grow(p, 1))
 				return p;
-			if (sTextStop[(uint8)mData[p]])
+		}
+	}
+
+	/// Skips bytes from `pos` up to the first `a` or `b`, as ScanText does. @return Its offset, or the
+	/// end of the input.
+	[Inline]
+	int ScanUntil(int pos, char8 a, char8 b)
+	{
+		int p = pos;
+		while (true)
+		{
+			while (p + 8 <= mEnd)
+			{
+				uint64 word = XmlChar.Load64(mData + p);
+				if ((XmlChar.BytesEqual(word, (uint8)a) | XmlChar.BytesEqual(word, (uint8)b)) != 0)
+					break;
+				p += 8;
+			}
+			while (p < mEnd)
+			{
+				char8 c = mData[p];
+				if (c == a || c == b)
+					return p;
+				p++;
+			}
+			if (!Grow(p, 1))
 				return p;
-			p++;
 		}
 	}
 
@@ -282,8 +313,7 @@ extension XmlReaderCore<TCursor>
 		int end = p;
 		while (true)
 		{
-			while (Avail(p) && mData[p] != '-' && mData[p] != '\r')
-				p++;
+			p = ScanUntil(p, '-', '\r');
 			if (!Avail(p))
 				return .Err(Fail(.UnexpectedEof, "The comment is not closed (expected `-->`)", start, 4));
 			if (mData[p] == '\r')
@@ -358,8 +388,7 @@ extension XmlReaderCore<TCursor>
 			runStart = p;
 			while (true)
 			{
-				while (Avail(p) && mData[p] != '?' && mData[p] != '\r')
-					p++;
+				p = ScanUntil(p, '?', '\r');
 				if (!Avail(p))
 					return .Err(Fail(.UnexpectedEof, "The processing instruction is not closed (expected `?>`)", start, targetEnd - start));
 				if (mData[p] == '\r')
@@ -417,8 +446,7 @@ extension XmlReaderCore<TCursor>
 		int end = p;
 		while (true)
 		{
-			while (Avail(p) && mData[p] != ']' && mData[p] != '\r')
-				p++;
+			p = ScanUntil(p, ']', '\r');
 			if (!Avail(p))
 				return .Err(Fail(.UnexpectedEof, "The CDATA section is not closed (expected `]]>`)", start, 9));
 			if (mData[p] == '\r')

@@ -433,6 +433,13 @@ internal static class XmlChar
 		return (control & ~allowed) == 0;
 	}
 
+	/// The number of bytes of `mask` whose high bit is set (no other bits may be).
+	[Inline]
+	public static int CountHighBits(uint64 mask)
+	{
+		return (int)(((mask >> 7) * 0x0101010101010101UL) >> 56);
+	}
+
 	/// The high bit of each zero byte of `x`, exactly.
 	[Inline]
 	public static uint64 ZeroBytes(uint64 x)
