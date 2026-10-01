@@ -4,9 +4,10 @@
 # Usage: ./test-svg-corpus.sh            (Debug binary)
 #        BIN=./build/Release_Linux64/XmlTester/XmlTester ./test-svg-corpus.sh
 #
-# Per file: the document read must succeed; the reader's events must give the same suite form as the
-# document; the canonical writer must keep it (XmlTester -rewrite) and be a fixed point (writing the
-# written document again changes nothing). tests/corpus/expected-failures.txt lists deliberate
+# Per file: the document read must succeed; the reader's events, and a document read from a Stream
+# through a 16-byte buffer, must give the same suite form as the document; the canonical writer must
+# keep it (XmlTester -rewrite) and be a fixed point (writing the written document again changes
+# nothing). tests/corpus/expected-failures.txt lists deliberate
 # exceptions (path under tests/suites<TAB>reason); a listed file that passes fails the run. Details go
 # to test-svg-corpus.log. `*.svgz` files are gzip and skipped.
 #
@@ -60,6 +61,7 @@ while IFS= read -r -d '' file; do
 		why="REJECTED (exit $status): $(head -1 "$tmpdir/err")"
 	else
 		timeout 10 "$BIN" -events "$file" > "$tmpdir/events" 2>&1
+		timeout 10 "$BIN" -stream 16 "$file" > "$tmpdir/stream" 2>&1
 		timeout 10 "$BIN" -rewrite "$file" > "$tmpdir/rewrite" 2>&1
 		status=$?
 		timeout 10 "$BIN" -write "$file" > "$tmpdir/written" 2>&1
@@ -69,6 +71,8 @@ while IFS= read -r -d '' file; do
 			why="REWRITE FAILED (exit $status)"
 		elif ! cmp -s "$tmpdir/document" "$tmpdir/events"; then
 			why="EVENTS DIFFER FROM THE DOCUMENT"
+		elif ! cmp -s "$tmpdir/document" "$tmpdir/stream"; then
+			why="A 16-BYTE STREAM DIFFERS FROM MEMORY"
 		elif ! cmp -s "$tmpdir/document" "$tmpdir/rewrite"; then
 			why="REWRITE CHANGED THE CONTENT"
 		elif ! cmp -s "$tmpdir/written" "$tmpdir/written2"; then
@@ -89,7 +93,7 @@ while IFS= read -r -d '' file; do
 	fi
 done < <(find "$SUITES/svg11" "$SUITES/resvg" -name '*.svg' -not -path '*/.git/*' -print0 | sort -z)
 
-echo "SVG corpus: $passed/$total files pass (document, events, rewrite, fixed point)"
+echo "SVG corpus: $passed/$total files pass (document, events, stream, rewrite, fixed point)"
 failed=0
 if [ $crashes -gt 0 ]; then
 	echo "crashes: $crashes"

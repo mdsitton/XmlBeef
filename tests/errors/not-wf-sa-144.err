@@ -1,0 +1,1 @@
+4:6: The character reference `&#xFFFF;` refers to U+FFFF, which is not a `Char`

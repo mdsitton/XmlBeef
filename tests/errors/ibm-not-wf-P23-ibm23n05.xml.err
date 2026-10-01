@@ -1,0 +1,1 @@
+1:55: Expected `?>` to end the XML declaration (its pseudo-attributes are `version`, `encoding` and `standalone`, in that order)

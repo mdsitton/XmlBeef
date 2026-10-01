@@ -25,14 +25,22 @@ internal interface IXmlCursor
 	/// Whether the input has failed (TryGetInputError would make an error), without making one.
 	bool HasInputError { get; }
 
-	/// The 1-based line and column (in code points) of `offset`.
+	/// The 1-based line and column (in code points) of `offset`: always for in-memory input; for a
+	/// stream only from the earliest offset it still counts (the start of the current construct).
 	bool Locate(int offset, out int line, out int column) mut;
+
+	/// Whether Locate only works forward (streams): positions an error may need later, such as an open
+	/// element's start, must then be located when they are read.
+	bool LocatesOnlyForward { get; }
 
 	/// The encoding the document was read in (after Begin).
 	XmlEncoding Encoding { get; }
 
 	/// The input's size in bytes as read (before transcoding), for the entity amplification ratio.
 	int InputBytes { get; }
+
+	/// Whether a UTF-8 byte order mark overrode a declaration of an 8-bit encoding (after Begin).
+	bool BomOverridesDeclaration { get; }
 }
 
 /// Counts lines and columns forward through the input, one offset at a time.
@@ -75,15 +83,19 @@ internal struct XmlByteCursor : IXmlCursor
 	StringView mText;
 	/// Receives the UTF-8 text of a document in another encoding (owned by the reader).
 	String mTranscoded;
+	XmlReadConfig mConfig;
 	int mMaxInputBytes;
 	XmlLineCounter mLines;
 	XmlEncoding mEncoding;
+	bool mBomOverride;
 
 	public this(StringView input, String transcoded, XmlReadConfig config)
 	{
+		mBomOverride = false;
 		mInput = input;
 		mText = input;
 		mTranscoded = transcoded;
+		mConfig = config;
 		mMaxInputBytes = config.MaxInputBytes;
 		mLines = .(0);
 		mEncoding = .Utf8;
@@ -97,7 +109,7 @@ internal struct XmlByteCursor : IXmlCursor
 		if (mMaxInputBytes > 0 && mInput.Length > mMaxInputBytes)
 			return .Err(XmlParseError(.ResourceLimitExceeded, scope $"The input ({mInput.Length} bytes) exceeds MaxInputBytes ({mMaxInputBytes})", 1, 1, 0, 0));
 		int start = 0;
-		if (XmlEncodingDetector.Prepare(mInput, mTranscoded, out mText, out start, out mEncoding) case .Err(let error))
+		if (XmlEncodingDetector.Prepare(mInput, mTranscoded, mConfig, out mText, out start, out mEncoding, out mBomOverride) case .Err(let error))
 			return .Err(error);
 		data = mText.Ptr;
 		end = mText.Length;
@@ -134,6 +146,14 @@ internal struct XmlByteCursor : IXmlCursor
 	public XmlEncoding Encoding => mEncoding;
 
 	public int InputBytes => mInput.Length;
+
+	public bool BomOverridesDeclaration => mBomOverride;
+
+	public bool LocatesOnlyForward
+	{
+		[Inline]
+		get => false;
+	}
 
 	public bool Locate(int offset, out int line, out int column) mut
 	{

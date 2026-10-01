@@ -109,6 +109,6 @@ static class XmlFastPathTests
 		Accepts("<é a·b=\"1\" ab=\"2\"/>", "<é ab=\"2\" a·b=\"1\"></é>");
 		// A non-ASCII character after an ASCII start takes the full name scan
 		Accepts("<a中 b中=\"1\"/>", "<a中 b中=\"1\"></a中>");
-		Rejects("<a b×=\"1\"/>", .UnexpectedChar);
+		Rejects("<a b×=\"1\"/>", .InvalidName);
 	}
 }

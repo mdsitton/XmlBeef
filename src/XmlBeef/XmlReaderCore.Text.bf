@@ -383,7 +383,8 @@ extension XmlReaderCore<TCursor>
 			return .Err(Fail(.ResourceLimitExceeded, scope $"A processing instruction is longer than MaxTextBytes ({mConfig.MaxTextBytes})", start, targetEnd - start));
 		mPos = p;
 		mNameId = .None;
-		mName = target;
+		// From offsets: reading the data may have moved a stream's buffer
+		mName = View(start + 2, targetEnd - start - 2);
 		mNamespace = .None;
 		Report(start, p, depth);
 		return XmlEvent.ProcessingInstruction;

@@ -1,0 +1,1 @@
+4:6: `&` must start a reference (`&name;` or `&#…;`); write `&amp;` for the character (in the replacement text of the entity `e`)

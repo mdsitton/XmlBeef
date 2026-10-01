@@ -165,6 +165,15 @@ public struct XmlNode : IEquatable<XmlNode>
 	/// @brief The number of child nodes (every kind).
 	public int ChildCount => Record.mChildCount;
 
+	/// @brief Where the node came from, when the document was read with XmlMetadataMode.Positions.
+	/// @param range Receives the range (see XmlSourceRange.mLength for what it covers).
+	/// @return Whether the node has one (not without Positions, nor for the document node).
+	public bool TryGetSourceRange(out XmlSourceRange range)
+	{
+		Runtime.Assert(IsValid, "XmlNode: the handle is invalid");
+		return mDocument.TryGetRange(mDocument.mNodeRanges, mId, out range);
+	}
+
 	/// @brief The node's depth: 0 for the root element and the nodes beside it. Walks up the tree.
 	public int Depth
 	{
@@ -436,6 +445,15 @@ public struct XmlAttribute
 	public bool IsSpecified => !Record.mFlags.HasFlag(.Defaulted);
 	/// @brief The name's interned ID.
 	public XmlNameId NameId => Record.mName;
+
+	/// @brief Where the attribute came from (name through closing quote), when the document was read with
+	/// XmlMetadataMode.Positions.
+	/// @param range Receives the range.
+	/// @return Whether it has one (not without Positions, nor for an attribute defaulted from the DTD).
+	public bool TryGetSourceRange(out XmlSourceRange range)
+	{
+		return mDocument.TryGetRange(mDocument.mAttributeRanges, mIndex, out range);
+	}
 }
 
 /// An element's attributes, in order: a live view, valid while its document is not cleared or read

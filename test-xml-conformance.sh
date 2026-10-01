@@ -9,17 +9,22 @@
 #   valid, invalid  must be accepted (exit 0); with an OUTPUT and ENTITIES="none", stdout must equal the
 #                   OUTPUT file byte for byte (the canonical form, docs/test-suites.md §4)
 #   not-wf          must be rejected (exit 1); with ENTITIES other than "none" the error may be in an
-#                   external entity that is not read, so acceptance is tolerated (counted separately)
+#                   external entity that is not read, so acceptance is tolerated (counted separately).
+#                   With ENTITIES="none", the first line of stderr must equal tests/errors/<ID>.err
+#                   (golden messages, `line:column: message`; UPDATE_GOLDEN=1 rewrites them from the
+#                   document mode's output, then review the diff), in every mode
 #   error           logged only
 # A crash (exit other than 0 or 1) or a timeout is always a failure. Failures are compared with
 # tests/xmlconf/expected-failures.txt (ID<TAB>reason): an unlisted failure fails the run, and so does a
 # listed case that passes (remove it from the list). UPDATE_EXPECTED=1 rewrites the list's IDs from
 # the current failures (keeping known reasons) for review. Details go to test-xml-conformance.log.
 #
-# Every case runs in each of MODES (default "document events rewrite"): document reads through an
-# XmlDocument; events formats straight from XmlReader's events; rewrite writes the document in
-# canonical form, reads that back and checks its suite form (the writer must keep the infoset; exit 3
-# if the rewrite is rejected). The stream mode joins in phase 4.
+# Every case runs in each of MODES (default "document events rewrite stream stream-events"): document
+# reads through an XmlDocument; events formats straight from XmlReader's events; rewrite writes the
+# document in canonical form, reads that back and checks its suite form (the writer must keep the
+# infoset; exit 3 if the rewrite is rejected); stream and stream-events read the file as a Stream through
+# a 16-byte buffer, so refills land inside names, references, CRLF pairs, multi-byte characters and
+# UTF-16 code units.
 #
 # Fetch the suite first with tests/fetch-suites.sh. Needs python3 (tests/xmlconf/manifest.py reads the
 # catalogs until XmlBeef reads external entities itself).
@@ -74,10 +79,12 @@ fi
 
 failed=0
 declare -A failures
-for mode in ${MODES:-document events rewrite}; do
+for mode in ${MODES:-document events rewrite stream stream-events}; do
 	flag=""
 	[ "$mode" = events ] && flag="-events"
 	[ "$mode" = rewrite ] && flag="-rewrite"
+	[ "$mode" = stream ] && flag="-stream 16"
+	[ "$mode" = stream-events ] && flag="-events -stream 16"
 
 	accept_pass=0; accept_total=0
 	reject_pass=0; reject_total=0
@@ -162,7 +169,16 @@ for mode in ${MODES:-document events rewrite}; do
 			else
 				reject_total=$((reject_total + 1))
 				if [ $status -eq 1 ]; then
-					reject_pass=$((reject_pass + 1))
+					golden="tests/errors/$id.err"
+					if [ -n "${UPDATE_GOLDEN:-}" ] && [ "$mode" = document ]; then
+						head -1 "$tmpdir/err" > "$golden"
+						reject_pass=$((reject_pass + 1))
+					elif head -1 "$tmpdir/err" | cmp -s - "$golden"; then
+						reject_pass=$((reject_pass + 1))
+					else
+						ok=0
+						why="ERROR MESSAGE CHANGED (expected: $(cat "$golden" 2>/dev/null || echo 'no golden file'))"
+					fi
 				elif [ $ok -eq 1 ]; then
 					ok=0
 					why="ACCEPTED (not-wf)"
@@ -215,7 +231,7 @@ for mode in ${MODES:-document events rewrite}; do
 	done < "$tmpdir/manifest"
 
 	echo "[$mode] accepted:  $accept_pass/$accept_total (valid and invalid)"
-	echo "[$mode] rejected:  $reject_pass/$reject_total (not-wf, no external entities)"
+	echo "[$mode] rejected:  $reject_pass/$reject_total (not-wf, no external entities; with the golden message)"
 	echo "[$mode] canonical: $canon_pass/$canon_total outputs match"
 	echo "[$mode] not-wf with external entities: $ext_rejected rejected, $ext_tolerated accepted (tolerated)"
 	echo "[$mode] error cases (logged only): $error_accepted accepted, $error_rejected rejected"

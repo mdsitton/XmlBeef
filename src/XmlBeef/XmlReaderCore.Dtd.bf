@@ -46,6 +46,8 @@ extension XmlReaderCore<TCursor>
 			mSubsetStart = p + 1;
 			mPos = p + 1;
 			mState = .InternalSubset;
+			// The whole subset stays in the window, for the DocType event's InternalSubset
+			mRetain = mSubsetStart;
 			return cNoEvent;
 		}
 		mSubsetStart = -1;
@@ -104,7 +106,6 @@ extension XmlReaderCore<TCursor>
 			}
 			if (c != '<')
 				return .Err(Unexpected(p, "a markup declaration, comment, processing instruction, parameter-entity reference or `]`"));
-			mRetain = p;
 			if (StartsWith(p, "<!--"))
 				Try!(ReadComment(0));
 			else if (At(p + 1) == '?')
@@ -601,11 +602,14 @@ extension XmlReaderCore<TCursor>
 		int p = Try!(RequireSpace(start + 10, "whitespace after `<!NOTATION`"));
 		int nameEnd = Try!(ScanNameInDeclaration(p, "the notation's name"));
 		Try!(CheckNoColon(p, nameEnd, "The notation name"));
-		StringView name = View(p, nameEnd - p);
+		// Copies: reading on may move a stream's buffer
+		let name = scope String(View(p, nameEnd - p));
 		p = Try!(RequireSpace(nameEnd, "whitespace after the notation's name"));
 		if (!StartsWith(p, "SYSTEM") && !StartsWith(p, "PUBLIC"))
 			return .Err(FailInDeclaration(p, "`SYSTEM` or `PUBLIC`"));
-		p = Try!(ReadExternalId(p, true, let publicId, let systemId, let hasPublic, let hasSystem));
+		p = Try!(ReadExternalId(p, true, let publicView, let systemView, let hasPublic, let hasSystem));
+		let publicId = scope String(publicView);
+		let systemId = scope String(systemView);
 		p = SkipSpace(p);
 		if (At(p) != '>')
 			return .Err(FailInDeclaration(p, "`>` to end the notation declaration"));

@@ -136,9 +136,9 @@ static class XmlEdgeCaseTests
 	[Test]
 	public static void Edge046_NotNameCharacters()
 	{
-		Rejects("<a×/>", .UnexpectedChar);
-		Rejects("<a\u{37E}/>", .UnexpectedChar);
-		Rejects("<a\u{A0}/>", .UnexpectedChar);
+		Rejects("<a×/>", .InvalidName);
+		Rejects("<a\u{37E}/>", .InvalidName);
+		Rejects("<a\u{A0}/>", .InvalidName);
 	}
 
 	[Test] public static void Edge047_ReservedPrefixIsLegal() => Accepts("<xmlfoo/>", "<xmlfoo></xmlfoo>");

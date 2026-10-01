@@ -371,8 +371,10 @@ rejecting an unsupported encoding is itself correct, if for the wrong reason).
 | `error` | Never a failure either way. Log accept/reject for information. Note that `invalid-bo-7`…`9` become genuine fatal errors (illegal character) when external general entities are read. | None. |
 
 In every mode a crash (exit other than 0 or 1), a timeout, or a leak (in the leak-check script) is
-a failure. The error message is not checked against the suite (the suite does not specify
-messages); golden error files like KdlBeef's `tests/errors/` are an optional later regression aid.
+a failure. The suite does not specify messages; XmlBeef's own are pinned by golden files in
+`tests/errors/<ID>.err` (one per rejected not-wf case: kind, line, column and message), compared in
+every mode, so memory and stream input must fail the same way. After an intended message change,
+regenerate them with `UPDATE_GOLDEN=1 MODES=document ./test-xml-conformance.sh` and review the diff.
 
 ### 6.3 External entities
 

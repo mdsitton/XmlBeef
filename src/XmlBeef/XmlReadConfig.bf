@@ -45,6 +45,15 @@ public struct XmlReadConfig
 	/// @brief How a DOCTYPE is treated.
 	public XmlDtdMode DtdMode = .Internal;
 
+	/// @brief Converts documents in legacy encodings the reader does not decode itself (its built-in ones:
+	/// UTF-8, UTF-16, UTF-32, ISO-8859-1 to -16, US-ASCII, Windows-874 and 1250 to 1258, KOI8-R and -U,
+	/// IBM866, Macintosh). Called with the declared name of any other encoding; null: such a document is
+	/// an UnsupportedEncoding error. Only viewed: it must outlive the read.
+	public XmlEncodingConverter EncodingConverter = null;
+	/// @brief A document with no byte order mark and no encoding declaration must be UTF-8; set
+	/// Windows1252 to read one that is not as Windows-1252 instead of rejecting it.
+	public XmlEncodingFallback EncodingFallback = .None;
+
 	/// @brief Maximum element nesting depth: 1 allows the root element only. 0 = unlimited.
 	public int MaxDepth = 256;
 	/// @brief Maximum input size in bytes (before transcoding). 0 = unlimited.
@@ -73,10 +82,15 @@ public struct XmlReadConfig
 	/// 0 = no ratio.
 	public int MaxEntityAmplification = 10;
 
-	/// @brief Buffer size in bytes for reading a Stream. 0 = default (64 KiB).
+	/// @brief Buffer size in bytes for reading a Stream. 0 = default (64 KiB); values below 16 are raised
+	/// to 16. Setting it also makes XmlDocument.ReadFile stream the file through a buffer of this size
+	/// instead of loading it whole.
 	public int StreamBufferBytes = 0;
-	/// @brief Streams only: the most bytes the reader may hold at once for one construct.
-	/// 0 = unlimited.
+	/// @brief Streams only: the most bytes the reader may hold at once for one construct (a tag, a run of
+	/// text, a comment, a processing instruction, CDATA section, the whole internal subset), counted from
+	/// its start through what the reader looks at to find its end. Longer constructs fail with
+	/// ResourceLimitExceeded whatever the buffer size: the buffer never grows past this, and
+	/// StreamBufferBytes is lowered to it. Whitespace between constructs is not held. 0 = unlimited.
 	public int MaxTokenBytes = 10000000;
 
 	/// @brief The limits raised for large trusted inputs (libxml2's XML_PARSE_HUGE): depth 2048, text and

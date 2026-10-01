@@ -420,7 +420,12 @@ quick-xml's class, the document at or above roxmltree (the fastest correct DOM),
 libxml2 and expat, all while passing every benchmark input and the W3C suite (pugixml is faster but
 skips checks and leaves DTD entities unexpanded).
 
-**Phase 4 — Errors, positions, limits, streams, encodings.** Golden messages, Positions sidecar,
+**Phase 4 — Errors, positions, limits, streams, encodings.** *Done (2026-09-30): `Read(Stream)`
+through a bounded buffer passes the suite and the corpus with a 16-byte buffer, with the same events
+and errors as memory input; 950 golden messages checked in all five script modes; Positions; every
+limit tested; the WHATWG single-byte tables (`tools/gen-encoding-tables.py`), the converter hook,
+the Windows-1252 fallback; the BOM override reported by `EncodingWarning` (a property rather than a
+sidecar slot). See `architecture.md` §3, §4.* Golden messages, Positions sidecar,
 every limit with tests, `Read(Stream)` (all input paths produce identical documents and errors),
 UTF-32, the single-byte encoding tables (generated from the WHATWG index files by a script kept in
 the repository), the converter hook and the opt-in fallback.

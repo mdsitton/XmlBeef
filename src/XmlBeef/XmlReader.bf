@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.IO;
 using internal XmlBeef;
 
 namespace XmlBeef;
@@ -62,12 +63,19 @@ public enum XmlEvent : uint8
 public class XmlReader
 {
 	XmlReaderCore<XmlByteCursor> mBytes ~ delete _;
+	/// Created on the first stream read.
+	XmlReaderCore<XmlBufferedStreamCursor> mStream ~ delete _;
+	XmlStreamState mStreamState ~ delete _;
+	/// The core reading now (mBytes or mStream): the event's state is read from it.
+	XmlReaderCoreBase mCore;
+	bool mStreaming;
 	String mTranscoded ~ delete _;
 
 	/// @brief Create a reader with no input; call Reset before reading.
 	public this()
 	{
 		mBytes = new .();
+		mCore = mBytes;
 		mTranscoded = new .();
 	}
 
@@ -100,8 +108,7 @@ public class XmlReader
 	/// the read).
 	public void Reset(StringView input, XmlReadConfig config)
 	{
-		mTranscoded.Clear();
-		mBytes.Reset(XmlByteCursor(input, mTranscoded, config), config);
+		Reset(input, config, null);
 	}
 
 	/// @brief Start reading bytes from the beginning.
@@ -112,47 +119,87 @@ public class XmlReader
 		Reset(StringView((char8*)input.Ptr, input.Length), config);
 	}
 
-	/// Starts a read that interns names into `names` (a document's, cleared by it), not the reader's own.
+	/// Starts a read that interns names into `names` (a document's, cleared by it; null: the reader's own).
 	internal void Reset(StringView input, XmlReadConfig config, XmlNameTable names)
 	{
+		mStreaming = false;
+		mCore = mBytes;
 		mTranscoded.Clear();
 		mBytes.Reset(XmlByteCursor(input, mTranscoded, config), config, names);
 	}
 
+	/// @brief Start reading a stream with the default config.
+	/// @param stream The document (any supported encoding; see the class), read from its current
+	/// position; it must outlive the reader's use of it.
+	public void Reset(Stream stream)
+	{
+		Reset(stream, .());
+	}
+
+	/// @brief Start reading a stream through a buffer of `config.StreamBufferBytes` (64 KiB by default):
+	/// memory stays bounded by the buffer and the longest construct (see `config.MaxTokenBytes`). The
+	/// events and errors are those of the same document in memory, except that an encoding error further
+	/// on than the first buffer is reported when the reader gets there, after the events before it.
+	/// @param stream The document, read from its current position; it must outlive the reader's use of it.
+	/// @param config Namespaces, DTD handling, limits, buffer size and the source name.
+	public void Reset(Stream stream, XmlReadConfig config)
+	{
+		Reset(stream, config, null);
+	}
+
+	/// A stream read that interns names into `names` (a document's; null: the reader's own).
+	internal void Reset(Stream stream, XmlReadConfig config, XmlNameTable names)
+	{
+		mStreaming = true;
+		if (mStream == null)
+		{
+			mStream = new .();
+			mStreamState = new .();
+		}
+		mCore = mStream;
+		mStream.Reset(XmlBufferedStreamCursor(stream, mStreamState, config), config, names);
+	}
+
 	/// The table the event's names are interned in.
-	internal XmlNameTable Names => mBytes.mNames;
+	internal XmlNameTable Names => mCore.mNames;
 
 	/// @brief ProcessingInstruction: whether it is inside the DOCTYPE's internal subset (reported before
 	/// the DocType event, which comes at the DOCTYPE's end).
-	public bool IsInDocType => mBytes.InDocType;
+	public bool IsInDocType => mCore.InDocType;
 
 	/// @brief Read up to the next event.
 	/// @return The event, or the read's error (see IsStopped).
 	[Inline]
 	public Result<XmlEvent, XmlParseError> Next()
 	{
-		if (mBytes.NextEvent() case .Ok(let event))
+		if (!mStreaming)
+		{
+			if (mBytes.NextEvent() case .Ok(let event))
+				return .Ok(event);
+			return .Err(mBytes.Error);
+		}
+		if (mStream.NextEvent() case .Ok(let event))
 			return .Ok(event);
-		return .Err(mBytes.Error);
+		return .Err(mStream.Error);
 	}
 
 	/// @brief Whether the read has stopped at an error; Next returns it again.
-	public bool IsStopped => mBytes.IsStopped;
+	public bool IsStopped => mCore.IsStopped;
 
 	/// @brief StartElement, EndElement: the element's qualified name as written. ProcessingInstruction:
 	/// the target. EntityReference: the entity's name. DocType: the root element's name.
-	public StringView Name => mBytes.mName;
+	public StringView Name => mCore.mName;
 	/// @brief StartElement, EndElement: the element's interned name (also its ID in `NameTable`).
-	public XmlNameId NameId => mBytes.mNameId;
+	public XmlNameId NameId => mCore.mNameId;
 	/// @brief StartElement, EndElement: the local part of the name (the name itself without
 	/// namespaces or without a prefix).
 	public StringView LocalName
 	{
 		get
 		{
-			if (!mBytes.mNameId.IsValid || !mBytes.mConfig.Namespaces)
-				return mBytes.mName;
-			return mBytes.mNames[mBytes.mNames.LocalOf(mBytes.mNameId)];
+			if (!mCore.mNameId.IsValid || !mCore.mConfig.Namespaces)
+				return mCore.mName;
+			return mCore.mNames[mCore.mNames.LocalOf(mCore.mNameId)];
 		}
 	}
 	/// @brief StartElement, EndElement: the prefix (empty if none, or without namespaces).
@@ -160,106 +207,129 @@ public class XmlReader
 	{
 		get
 		{
-			if (!mBytes.mNameId.IsValid || !mBytes.mConfig.Namespaces)
+			if (!mCore.mNameId.IsValid || !mCore.mConfig.Namespaces)
 				return default;
-			return mBytes.mNames[mBytes.mNames.PrefixOf(mBytes.mNameId)];
+			return mCore.mNames[mCore.mNames.PrefixOf(mCore.mNameId)];
 		}
 	}
 	/// @brief StartElement, EndElement: the namespace name (empty for none).
-	public StringView NamespaceUri => mBytes.mNames[mBytes.mNamespace];
+	public StringView NamespaceUri => mCore.mNames[mCore.mNamespace];
 	/// @brief StartElement, EndElement: the namespace's interned ID (XmlNameId.None for none).
-	public XmlNameId NamespaceId => mBytes.mNamespace;
+	public XmlNameId NamespaceId => mCore.mNamespace;
 	/// @brief Text, CData, Comment, ProcessingInstruction: the content.
-	public StringView Value => mBytes.mValue;
+	public StringView Value => mCore.mValue;
 	/// @brief StartElement: whether the element was written as an empty-element tag (`<a/>`).
-	public bool IsEmptyElement => mBytes.mIsEmpty;
+	public bool IsEmptyElement => mCore.mIsEmpty;
 	/// @brief The depth of the event: 0 for the root element's StartElement and EndElement and for
 	/// everything outside it, 1 for the root's content, and so on.
-	public int Depth => mBytes.mDepth;
+	public int Depth => mCore.mDepth;
 	/// @brief Byte offset into the input where the event's construct starts (inside an entity's
 	/// replacement text: the reference's). In UTF-8 terms when the input was transcoded.
-	public int Offset => mBytes.mEventOffset;
+	public int Offset => mCore.mEventOffset;
 	/// @brief Byte offset just past the event's construct.
-	public int EndOffset => mBytes.mEventEnd;
+	public int EndOffset => mCore.mEventEnd;
 
 	/// @brief XmlDeclaration: the version as written (`1.0`; any `1.x` is read as 1.0).
-	public StringView Version => mBytes.mVersion;
+	public StringView Version => mCore.mVersion;
 	/// @brief XmlDeclaration: the declared encoding name, empty if none.
-	public StringView Encoding => mBytes.mEncodingName;
+	public StringView Encoding => mCore.mEncodingName;
 	/// @brief XmlDeclaration: the `standalone` pseudo-attribute.
-	public XmlStandalone Standalone => mBytes.mStandalone;
+	public XmlStandalone Standalone => mCore.mStandalone;
 	/// @brief The encoding the document was read in (after the first Next).
-	public XmlEncoding DocumentEncoding => mBytes.mCursor.Encoding;
+	public XmlEncoding DocumentEncoding => mStreaming ? mStream.mCursor.Encoding : mBytes.mCursor.Encoding;
+	/// @brief A warning about the document's encoding, empty if none (after the first Next): the one
+	/// there is, a UTF-8 byte order mark overriding an encoding declaration that names another
+	/// (8-bit) encoding, which is read as UTF-8 (plan.md §9 item 6).
+	public StringView EncodingWarning
+	{
+		get
+		{
+			bool overridden = mStreaming ? mStream.mCursor.BomOverridesDeclaration : mBytes.mCursor.BomOverridesDeclaration;
+			return overridden ? "The document starts with a UTF-8 byte order mark, so its encoding declaration is ignored and it is read as UTF-8" : default;
+		}
+	}
 
 	/// @brief DocType: the public identifier as written (empty if none; see HasPublicId).
-	public StringView PublicId => mBytes.mPublicId;
+	public StringView PublicId => mCore.mPublicId;
 	/// @brief DocType: the system identifier (empty if none; see HasSystemId).
-	public StringView SystemId => mBytes.mSystemId;
+	public StringView SystemId => mCore.mSystemId;
 	/// @brief DocType: whether a public identifier was given.
-	public bool HasPublicId => mBytes.mHasPublicId;
+	public bool HasPublicId => mCore.mHasPublicId;
 	/// @brief DocType: whether a system identifier was given.
-	public bool HasSystemId => mBytes.mHasSystemId;
+	public bool HasSystemId => mCore.mHasSystemId;
 	/// @brief DocType: the internal subset's text between `[` and `]`, empty if none.
-	public StringView InternalSubset => mBytes.mInternalSubset;
+	public StringView InternalSubset => mCore.mInternalSubset;
 	/// @brief DocType: whether it has an internal subset (`[…]`, possibly empty).
-	public bool HasInternalSubset => mBytes.HasInternalSubset;
+	public bool HasInternalSubset => mCore.HasInternalSubset;
 	/// @brief The notations declared in the internal subset, in declaration order (from DocType on).
-	public Span<XmlNotation> Notations => mBytes.mDtd.mNotations;
+	public Span<XmlNotation> Notations => mCore.mDtd.mNotations;
 
 	/// @brief StartElement: the number of attributes, defaulted ones (from ATTLIST declarations)
 	/// included, after the specified ones. Namespace declarations (`xmlns`, `xmlns:p`) are attributes.
-	public int AttributeCount => mBytes.mAttributes.Count;
+	public int AttributeCount => mCore.mAttributes.Count;
 
 	/// @brief StartElement: an attribute's qualified name as written.
 	/// @param index 0 ..< AttributeCount.
 	/// @return The name.
-	public StringView AttributeName(int index) => mBytes.mNames[mBytes.mAttributes[index].mName];
+	public StringView AttributeName(int index) => mCore.mNames[mCore.mAttributes[index].mName];
 
 	/// @brief StartElement: an attribute's interned name.
 	/// @param index 0 ..< AttributeCount.
 	/// @return The name's ID.
-	public XmlNameId AttributeNameId(int index) => mBytes.mAttributes[index].mName;
+	public XmlNameId AttributeNameId(int index) => mCore.mAttributes[index].mName;
 
 	/// An attribute's interned local name (its name when it has no prefix or without namespaces).
 	internal XmlNameId AttributeLocalId(int index)
 	{
-		let attribute = mBytes.mAttributes[index];
+		let attribute = mCore.mAttributes[index];
 		return attribute.mLocal.IsValid ? attribute.mLocal : attribute.mName;
 	}
 
 	/// An attribute's interned namespace (None for no namespace).
-	internal XmlNameId AttributeNamespaceId(int index) => mBytes.mAttributes[index].mNamespace;
+	internal XmlNameId AttributeNamespaceId(int index) => mCore.mAttributes[index].mNamespace;
+
+	/// @brief StartElement: where an attribute is in the input, from its name to just past its value's
+	/// closing quote (inside an entity's replacement text: the reference). Both 0 for a defaulted one.
+	/// @param index 0 ..< AttributeCount.
+	/// @param offset Receives the byte offset of its name.
+	/// @param end Receives the byte offset just past it.
+	public void GetAttributeRange(int index, out int offset, out int end)
+	{
+		let attribute = mCore.mAttributes[index];
+		offset = attribute.mSpecified ? attribute.mOffset : 0;
+		end = attribute.mSpecified ? attribute.mEnd : 0;
+	}
 
 	/// @brief StartElement: an attribute's local name (the name itself without a prefix or namespaces).
 	/// @param index 0 ..< AttributeCount.
 	/// @return The local name.
 	public StringView AttributeLocalName(int index)
 	{
-		let attribute = mBytes.mAttributes[index];
-		return mBytes.mNames[attribute.mLocal.IsValid ? attribute.mLocal : attribute.mName];
+		let attribute = mCore.mAttributes[index];
+		return mCore.mNames[attribute.mLocal.IsValid ? attribute.mLocal : attribute.mName];
 	}
 
 	/// @brief StartElement: an attribute's prefix (empty if none).
 	/// @param index 0 ..< AttributeCount.
 	/// @return The prefix.
-	public StringView AttributePrefix(int index) => mBytes.mNames[mBytes.mAttributes[index].mPrefix];
+	public StringView AttributePrefix(int index) => mCore.mNames[mCore.mAttributes[index].mPrefix];
 
 	/// @brief StartElement: an attribute's namespace (empty for none: an unprefixed attribute is in no
 	/// namespace).
 	/// @param index 0 ..< AttributeCount.
 	/// @return The namespace name.
-	public StringView AttributeNamespaceUri(int index) => mBytes.mNames[mBytes.mAttributes[index].mNamespace];
+	public StringView AttributeNamespaceUri(int index) => mCore.mNames[mCore.mAttributes[index].mNamespace];
 
 	/// @brief StartElement: an attribute's normalized value (§3.3.3).
 	/// @param index 0 ..< AttributeCount.
 	/// @return The value.
-	public StringView AttributeValue(int index) => mBytes.mAttributes[index].mValue;
+	public StringView AttributeValue(int index) => mCore.mAttributes[index].mValue;
 
 	/// @brief StartElement: whether the attribute was given in the tag (false: a default from an
 	/// ATTLIST declaration).
 	/// @param index 0 ..< AttributeCount.
 	/// @return Whether it was specified.
-	public bool IsAttributeSpecified(int index) => mBytes.mAttributes[index].mSpecified;
+	public bool IsAttributeSpecified(int index) => mCore.mAttributes[index].mSpecified;
 
 	/// @brief StartElement: the value of the attribute with this qualified name.
 	/// @param name The name as written (`xlink:href`).
@@ -267,10 +337,10 @@ public class XmlReader
 	/// @return Whether the element has the attribute.
 	public bool TryGetAttribute(StringView name, out StringView value)
 	{
-		for (int i < mBytes.mAttributes.Count)
+		for (int i < mCore.mAttributes.Count)
 		{
-			let attribute = mBytes.mAttributes[i];
-			if (mBytes.mNames[attribute.mName] == name)
+			let attribute = mCore.mAttributes[i];
+			if (mCore.mNames[attribute.mName] == name)
 			{
 				value = attribute.mValue;
 				return true;
@@ -287,11 +357,11 @@ public class XmlReader
 	/// @return Whether the element has the attribute.
 	public bool TryGetAttribute(StringView namespaceUri, StringView localName, out StringView value)
 	{
-		for (int i < mBytes.mAttributes.Count)
+		for (int i < mCore.mAttributes.Count)
 		{
-			let attribute = mBytes.mAttributes[i];
+			let attribute = mCore.mAttributes[i];
 			XmlNameId local = attribute.mLocal.IsValid ? attribute.mLocal : attribute.mName;
-			if (mBytes.mNames[local] == localName && mBytes.mNames[attribute.mNamespace] == namespaceUri)
+			if (mCore.mNames[local] == localName && mCore.mNames[attribute.mNamespace] == namespaceUri)
 			{
 				value = attribute.mValue;
 				return true;
@@ -306,7 +376,7 @@ public class XmlReader
 	{
 		get
 		{
-			for (let c in mBytes.mValue)
+			for (let c in mCore.mValue)
 			{
 				if (!XmlChar.IsSpace(c))
 					return false;
@@ -318,6 +388,8 @@ public class XmlReader
 	/// The line and column of a document offset at or after the current event's start.
 	internal bool Locate(int offset, out int line, out int column)
 	{
+		if (mStreaming)
+			return mStream.mCursor.Locate(offset, out line, out column);
 		return mBytes.mCursor.Locate(offset, out line, out column);
 	}
 }

@@ -11,26 +11,11 @@ internal struct XmlFailure
 {
 }
 
-/// The reader itself, over a cursor (in-memory text; a buffered stream in phase 4). It reads through a
-/// window: `mData[offset]` for `mBase <= offset < mEnd`, offsets absolute. Anything that may read at
-/// the window's end asks for more first (`Avail`, `At`, `AvailN`); for in-memory text the window is the
-/// whole input and those checks compile away.
-///
-/// Entity replacement text is read by the same code through input frames (`mFrames`): a reference
-/// pushes the current window and reads the replacement text as the window until its end, where the
-/// frame pops (§4.4.2 "included"; in attribute values "included in literal"; in the internal subset a
-/// parameter entity between declarations). Constructs cannot cross a frame's end: the window simply
-/// ends there. Elements must close in the frame they open in.
-///
-/// Invariants:
-/// - **Event balance.** Every reported StartElement gets exactly one EndElement (an empty element's
-///   comes on the next call).
-/// - **Views.** Event strings view the window, an entity's replacement text, the name table or a
-///   reader buffer: valid until the next event.
-/// - **Errors are sticky.** The first error puts the reader in a failed state; Next returns it again.
-internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
+/// The reader's state, apart from its cursor: what XmlReaderCore<TCursor> works on and what XmlReader
+/// reports, the same whichever cursor reads (so XmlReader reads its properties from either core alike).
+internal class XmlReaderCoreBase
 {
-	enum State : uint8
+	internal enum State : uint8
 	{
 		/// Not validated yet.
 		Start,
@@ -48,7 +33,7 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 	}
 
 	/// An open element.
-	struct Element
+	internal struct Element
 	{
 		public XmlNameId mName;
 		public XmlNameId mNamespace;
@@ -58,10 +43,14 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 		public int32 mBindings;
 		/// Document offset of its `<`.
 		public int32 mStart;
+		/// Its `<`'s line and column, when the cursor cannot look back (a stream): the unclosed-element
+		/// error at the end needs them. 0: locate the offset then.
+		public int32 mLine;
+		public int32 mColumn;
 	}
 
 	/// A saved window under an entity's replacement text.
-	struct InputFrame
+	internal struct InputFrame
 	{
 		public char8* mData;
 		public int mBase;
@@ -77,7 +66,7 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 	}
 
 	/// An in-scope namespace declaration.
-	struct Binding
+	internal struct Binding
 	{
 		public XmlNameId mPrefix;
 		public XmlNameId mUri;
@@ -94,54 +83,54 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 		/// The value's start in mAttributeBuffer, or -1 when mValue views the input.
 		public int32 mBufferStart;
 		public int32 mBufferLength;
-		/// Document offset of the attribute's name.
+		/// Document offset of the attribute's name, and just past its value's closing quote.
 		public int32 mOffset;
+		public int32 mEnd;
 		/// Given in the tag (false: defaulted from an ATTLIST declaration).
 		public bool mSpecified;
 	}
 
-	internal TCursor mCursor;
-	char8* mData;
-	int mBase;
-	int mPos;
-	int mEnd;
+	internal char8* mData;
+	internal int mBase;
+	internal int mPos;
+	internal int mEnd;
 	/// The start of the construct being read: the cursor keeps bytes from here on in the window.
-	int mRetain;
+	internal int mRetain;
 	/// The cursor stopped on an error of the input; the reader's next error is replaced by it.
-	bool mInputFailed;
-	State mState;
+	internal bool mInputFailed;
+	internal State mState;
 	/// Offset of the first content byte (after a BOM): only there can an XML declaration start.
-	int mContentStart;
-	bool mSeenDocType;
+	internal int mContentStart;
+	internal bool mSeenDocType;
 	/// The DOCTYPE being read: where it and its internal subset start.
-	int mDocTypeStart;
-	int mSubsetStart;
-	XmlParseError mError;
+	internal int mDocTypeStart;
+	internal int mSubsetStart;
+	internal XmlParseError mError;
 	internal XmlReadConfig mConfig;
 
-	XmlStack<Element> mElements ~ delete _;
-	List<InputFrame> mFrames ~ delete _;
-	XmlStack<Binding> mBindings ~ delete _;
+	internal XmlStack<Element> mElements ~ delete _;
+	internal List<InputFrame> mFrames ~ delete _;
+	internal XmlStack<Binding> mBindings ~ delete _;
 	/// After an EndElement, its namespace declarations go out of scope on the next call (-1: none).
-	int mBindingsToPop = -1;
+	internal int mBindingsToPop = -1;
 	/// An empty element's EndElement is due.
-	bool mPendingEnd;
+	internal bool mPendingEnd;
 	/// The current start tag has a prefixed name or a namespace declaration (else namespace processing
 	/// only looks up the default namespace).
-	bool mNamespaceWork;
+	internal bool mNamespaceWork;
 
 	/// The names: the reader's own table, or a document's (which then owns them, and clears it).
-	XmlNameTable mOwnNames ~ delete _;
+	internal XmlNameTable mOwnNames ~ delete _;
 	internal XmlNameTable mNames;
 	internal XmlDtd mDtd ~ delete _;
-	String mTextBuffer ~ delete _;
-	String mAttributeBuffer ~ delete _;
-	String mScratch ~ delete _;
-	HashSet<XmlNameId> mSeenNames ~ delete _;
+	internal String mTextBuffer ~ delete _;
+	internal String mAttributeBuffer ~ delete _;
+	internal String mScratch ~ delete _;
+	internal HashSet<XmlNameId> mSeenNames ~ delete _;
 	/// The DOCTYPE's name and identifiers (kept while its internal subset is read).
-	String mDocTypeName ~ delete _;
-	String mDocTypePublicId ~ delete _;
-	String mDocTypeSystemId ~ delete _;
+	internal String mDocTypeName ~ delete _;
+	internal String mDocTypePublicId ~ delete _;
+	internal String mDocTypeSystemId ~ delete _;
 
 	// The event
 	internal XmlNameId mNameId;
@@ -169,8 +158,8 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 	internal XmlNameId mXmlnsUri;
 
 	/// Bytes produced by entity expansion so far.
-	int mExpandedBytes;
-	int mElementCount;
+	internal int mExpandedBytes;
+	internal int mElementCount;
 
 	internal const StringView cXmlNamespace = "http://www.w3.org/XML/1998/namespace";
 	internal const StringView cXmlnsNamespace = "http://www.w3.org/2000/xmlns/";
@@ -194,11 +183,10 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 		mConfig = .();
 	}
 
-	/// Starts a read. `names`: a table to intern into (a document's, already cleared by it); null for
-	/// the reader's own, which is cleared.
-	public void Reset(TCursor cursor, XmlReadConfig config, XmlNameTable names = null)
+	/// Starts a read's state. `names`: a table to intern into (a document's, already cleared by it);
+	/// null for the reader's own, which is cleared.
+	protected void ResetState(XmlReadConfig config, XmlNameTable names)
 	{
-		mCursor = cursor;
 		mConfig = config;
 		mData = null;
 		mBase = 0;
@@ -247,6 +235,52 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 		mXmlnsUri = XmlNameTable.cXmlnsNamespace;
 	}
 
+	/// Whether the read has stopped at an error.
+	public bool IsStopped => mState == .Failed;
+
+	/// Whether the reader is inside the DOCTYPE's internal subset (a ProcessingInstruction event there
+	/// belongs to the DOCTYPE).
+	public bool InDocType => mState == .InternalSubset;
+
+	/// DocType: whether it has an internal subset (`[…]`, possibly empty).
+	public bool HasInternalSubset => mSubsetStart >= 0;
+
+	internal XmlParseError Error => mError;
+}
+
+/// The reader itself, over a cursor (in-memory text, or a stream read through a buffer). It reads
+/// through a window: `mData[offset]` for `mBase <= offset < mEnd`, offsets absolute. Anything that may
+/// read at the window's end asks for more first (`Avail`, `At`, `AvailN`); for in-memory text the window
+/// is the whole input and those checks compile away.
+///
+/// Entity replacement text is read by the same code through input frames (`mFrames`): a reference
+/// pushes the current window and reads the replacement text as the window until its end, where the
+/// frame pops (§4.4.2 "included"; in attribute values "included in literal"; in the internal subset a
+/// parameter entity between declarations). Constructs cannot cross a frame's end: the window simply
+/// ends there. Elements must close in the frame they open in. A stream is not refilled inside a frame.
+///
+/// Invariants:
+/// - **Event balance.** Every reported StartElement gets exactly one EndElement (an empty element's
+///   comes on the next call).
+/// - **Retention.** The window keeps every byte from min(mRetain, mPos) on: mRetain is the start of the
+///   construct being read (a tag, a run of text, a comment; the whole internal subset), or nothing
+///   between constructs. Loops that keep a local position store it into mPos before asking for more.
+/// - **Views.** Event strings view the window, an entity's replacement text, the name table or a
+///   reader buffer: valid until the next event. Views of the window taken while a construct is read are
+///   moved when a refill moves the buffer (RebaseViews); locals hold offsets, not views, across reads.
+/// - **Errors are sticky.** The first error puts the reader in a failed state; Next returns it again.
+internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCursor
+{
+	internal TCursor mCursor;
+
+	/// Starts a read. `names`: a table to intern into (a document's, already cleared by it); null for
+	/// the reader's own, which is cleared.
+	public void Reset(TCursor cursor, XmlReadConfig config, XmlNameTable names = null)
+	{
+		mCursor = cursor;
+		ResetState(config, names);
+	}
+
 	/// The next event; on failure the error is in mError. (XmlReader.Next makes the public Result, so
 	/// the large error is copied once.)
 	[Inline]
@@ -259,18 +293,6 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 			mState = .Failed;
 		return result;
 	}
-
-	/// Whether the read has stopped at an error.
-	public bool IsStopped => mState == .Failed;
-
-	/// Whether the reader is inside the DOCTYPE's internal subset (a ProcessingInstruction event there
-	/// belongs to the DOCTYPE).
-	public bool InDocType => mState == .InternalSubset;
-
-	/// DocType: whether it has an internal subset (`[…]`, possibly empty).
-	public bool HasInternalSubset => mSubsetStart >= 0;
-
-	internal XmlParseError Error => mError;
 
 	/// A step's result when it read something that reports no event (never returned by Next).
 	const XmlEvent cNoEvent = (XmlEvent)0xFF;
@@ -437,7 +459,7 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 			if (mInputFailed)
 				return .Err(Fail(.IoError, "", p));
 			let open = mElements.Back;
-			return .Err(Fail(.UnclosedElement, scope $"The element `{mNames[open.mName]}` is not closed", open.mStart, 1 + mNames[open.mName].Length));
+			return .Err(FailAt(.UnclosedElement, scope $"The element `{mNames[open.mName]}` is not closed", open.mStart, open.mLine, open.mColumn, 1 + mNames[open.mName].Length));
 		}
 		if (mData[p] != '<')
 			return ReadText();
@@ -588,7 +610,12 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 	{
 		if (mFrames.Count > 0)
 			return false;
+		char8* oldData = mData;
+		int oldBase = mBase;
+		int oldEnd = mEnd;
 		bool grew = mCursor.Fill(ref mData, ref mBase, ref mEnd, Math.Min(Math.Min(mRetain, mPos), pos), pos, count);
+		if (mData != oldData)
+			RebaseViews(oldData, oldBase, oldEnd);
 		if (!grew)
 		{
 			if (mCursor.HasInputError)
@@ -596,6 +623,32 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 			return false;
 		}
 		return pos + count <= mEnd;
+	}
+
+	/// After a stream's buffer moved: the views of the old window taken for the event being read (its
+	/// name and value, the declaration's pseudo-attributes, a start tag's attribute values) move with it.
+	void RebaseViews(char8* oldData, int oldBase, int oldEnd)
+	{
+		char8* low = oldData + oldBase;
+		char8* high = oldData + oldEnd;
+		Rebase(ref mName, low, high, oldData);
+		Rebase(ref mValue, low, high, oldData);
+		Rebase(ref mVersion, low, high, oldData);
+		Rebase(ref mEncodingName, low, high, oldData);
+		Rebase(ref mInternalSubset, low, high, oldData);
+		for (int i < mAttributes.Count)
+		{
+			ref AttributeRecord attribute = ref mAttributes[i];
+			if (attribute.mBufferStart < 0)
+				Rebase(ref attribute.mValue, low, high, oldData);
+		}
+	}
+
+	/// Moves a view of the old window to the same offsets in the new one.
+	void Rebase(ref StringView view, char8* low, char8* high, char8* oldData)
+	{
+		if (view.Ptr >= low && view.Ptr < high)
+			view = .(mData + (view.Ptr - oldData), view.Length);
 	}
 
 	/// The byte at `pos`, or 0 if there is none.
@@ -768,6 +821,17 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 		return .();
 	}
 
+	/// Fail at a position located earlier (line 0: locate it now, as Fail does).
+	XmlFailure FailAt(XmlErrorKind kind, StringView message, int offset, int line, int column, int length = 1)
+	{
+		if (line == 0 || mFrames.Count > 0 || (mInputFailed && mCursor.HasInputError))
+			return Fail(kind, message, offset, length);
+		mError = XmlParseError(kind, message, line, column, offset, length);
+		if (!mConfig.SourceName.IsEmpty)
+			mError.SetSource(mConfig.SourceName);
+		return .();
+	}
+
 	/// "Expected X, found Y" at `pos`.
 	XmlFailure Unexpected(int pos, StringView expected)
 	{
@@ -781,6 +845,17 @@ internal class XmlReaderCore<TCursor> where TCursor : IXmlCursor
 			return Fail(.UnexpectedEof, message, pos, 0);
 		}
 		char32 cp = DecodeAt(pos, let length);
+		// A character that is not a name character, right after a name: the likely mistake is the name
+		if ((uint32)cp >= 0x80 && !XmlChar.IsNameChar(cp) && pos > mBase && XmlChar.NameByteClass(mData[pos - 1]) != XmlChar.cNameStop)
+		{
+			let nameMessage = scope String();
+			nameMessage.Append('`');
+			nameMessage.Append(View(pos, length));
+			nameMessage.Append("` (");
+			XmlChar.AppendCodePointName(nameMessage, (uint32)cp);
+			nameMessage.Append(") cannot be part of a name");
+			return Fail(.InvalidName, nameMessage, pos, length);
+		}
 		if ((uint32)cp <= 0x20)
 		{
 			switch (cp)

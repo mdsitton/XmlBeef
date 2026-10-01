@@ -1,0 +1,1 @@
+4:6: The character reference `&#x110000;` refers to a value beyond U+10FFFF, which is not a `Char`

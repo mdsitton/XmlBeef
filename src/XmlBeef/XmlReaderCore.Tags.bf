@@ -57,7 +57,8 @@ extension XmlReaderCore<TCursor>
 			}
 			if (p == spaceStart)
 			{
-				if (XmlChar.NameByteClass(c) != XmlChar.cNameStop)
+				uint8 cls = XmlChar.NameByteClass(c);
+				if (cls == XmlChar.cNameStart || (cls == XmlChar.cNameDecode && XmlChar.IsNameStartChar(DecodeAt(p, let length))))
 					return .Err(Fail(.UnexpectedChar, "Attributes must be separated by whitespace", p));
 				return .Err(Unexpected(p, "whitespace, `>` or `/>`"));
 			}
@@ -94,11 +95,13 @@ extension XmlReaderCore<TCursor>
 				attribute.mValue = View(valueStart, q - valueStart);
 				attribute.mBufferStart = -1;
 				p = q + 1;
+				attribute.mEnd = (int32)DocEnd(p);
 				continue;
 			}
 			p = Try!(ReadAttributeValue(p, mAttributeBuffer, out attribute.mValue, let bufferStart));
 			attribute.mBufferStart = (int32)bufferStart;
 			attribute.mBufferLength = bufferStart >= 0 ? (int32)(mAttributeBuffer.Length - bufferStart) : 0;
+			attribute.mEnd = (int32)DocEnd(p);
 		}
 		mPos = p;
 		if (mAttributes.Count > 1)
@@ -137,6 +140,12 @@ extension XmlReaderCore<TCursor>
 		element.mFrameLevel = (int32)mFrames.Count;
 		element.mBindings = (int32)bindingStart;
 		element.mStart = (int32)DocOffset(start);
+		// A stream cannot look back for the unclosed-element error at the end: locate it now
+		if (mCursor.LocatesOnlyForward && mCursor.Locate(element.mStart, let line, let column))
+		{
+			element.mLine = (int32)line;
+			element.mColumn = (int32)column;
+		}
 		mNameId = name;
 		mName = mNames[name];
 		mNamespace = ns;

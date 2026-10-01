@@ -70,6 +70,15 @@ internal enum XmlAttributeFlags : uint8
 	Defaulted = 1
 }
 
+/// A source range without the source name (the document holds it). Line 0: no position.
+internal struct XmlRangeRecord
+{
+	public int32 mLine;
+	public int32 mColumn;
+	public int32 mOffset;
+	public int32 mLength;
+}
+
 /// An attribute in the document's attribute table.
 internal struct XmlAttributeRecord
 {
@@ -112,6 +121,8 @@ public class XmlDocument
 	internal StringView mEncodingName;
 	internal XmlStandalone mStandalone;
 	internal XmlEncoding mEncoding;
+	/// XmlReader.EncodingWarning (a literal, or empty).
+	internal StringView mEncodingWarning;
 	/// The DOCTYPE's identifiers and internal subset (as written), and its notations.
 	internal StringView mPublicId;
 	internal StringView mSystemId;
@@ -122,6 +133,9 @@ public class XmlDocument
 	internal List<XmlNotation> mNotations ~ delete _;
 	/// Read with namespace processing.
 	internal bool mNamespaces;
+	/// Positions mode: the source range of each node (by ID) and attribute (by index); empty otherwise.
+	internal List<XmlRangeRecord> mNodeRanges ~ delete _;
+	internal List<XmlRangeRecord> mAttributeRanges ~ delete _;
 	/// The document's copy of the input it was read from: values that are views of it are kept as they
 	/// are, and only decoded text (references, line ends) is copied into the store.
 	char8* mInputStart;
@@ -149,6 +163,8 @@ public class XmlDocument
 		mNodeStack = new .();
 		mPendingDocTypeNodes = new .();
 		mOrder = new .();
+		mNodeRanges = new .();
+		mAttributeRanges = new .();
 		mGeneration = 1;
 		mNamespaces = true;
 		XmlNodeRecord document = default;
@@ -177,6 +193,8 @@ public class XmlDocument
 	public XmlStandalone Standalone => mStandalone;
 	/// @brief The encoding the document was read in.
 	public XmlEncoding Encoding => mEncoding;
+	/// @brief A warning about the document's encoding, empty if none (see XmlReader.EncodingWarning).
+	public StringView EncodingWarning => mEncodingWarning;
 	/// @brief The DOCTYPE's public identifier (see HasPublicId).
 	public StringView PublicId => mPublicId;
 	/// @brief The DOCTYPE's system identifier (see HasSystemId).
@@ -203,6 +221,8 @@ public class XmlDocument
 		mNodes.Clear();
 		mAttributes.Clear();
 		mNotations.Clear();
+		mNodeRanges.Clear();
+		mAttributeRanges.Clear();
 		mSourceName.Clear();
 		mRoot = 0;
 		mDocType = 0;
@@ -211,6 +231,7 @@ public class XmlDocument
 		mEncodingName = default;
 		mStandalone = .Unspecified;
 		mEncoding = .Utf8;
+		mEncodingWarning = default;
 		mPublicId = default;
 		mSystemId = default;
 		mHasPublicId = false;
@@ -250,12 +271,7 @@ public class XmlDocument
 	/// @return .Ok, or the first error; the document is then empty.
 	public Result<void, XmlParseError> Read(StringView input, XmlReadConfig config)
 	{
-		Clear();
-		mSourceName.Set(config.SourceName);
-		var readerConfig = config;
-		readerConfig.SourceName = mSourceName;
-		if (mReader == null)
-			mReader = new XmlReader();
+		let readerConfig = BeginRead(config);
 		// One copy of the input; the reader's views into it last as long as the document
 		StringView owned = input;
 		if (config.MaxInputBytes <= 0 || input.Length <= config.MaxInputBytes)
@@ -265,8 +281,46 @@ public class XmlDocument
 			mInputEnd = owned.Ptr + owned.Length;
 		}
 		mReader.Reset(owned, readerConfig, mNames);
-		let result = Build(mReader, config);
-		// Nothing may keep viewing the caller's input
+		return EndRead(Build(mReader, config));
+	}
+
+	/// @brief Replace the document's content with the XML document read from a stream, using ReadConfig.
+	/// @param stream The document, read from its current position.
+	/// @return .Ok, or the first error; the document is then empty.
+	public Result<void, XmlParseError> Read(Stream stream)
+	{
+		return Read(stream, ReadConfig);
+	}
+
+	/// @brief Replace the document's content with the XML document read from a stream, through a buffer
+	/// of `config.StreamBufferBytes`: memory for the input stays bounded by the buffer and the longest
+	/// construct (see `config.MaxTokenBytes`); the document itself grows with the content.
+	/// @param stream The document, read from its current position.
+	/// @param config Namespaces, DTD handling, limits, buffer size and the source name.
+	/// @return .Ok, or the first error (IoError if reading fails); the document is then empty.
+	public Result<void, XmlParseError> Read(Stream stream, XmlReadConfig config)
+	{
+		let readerConfig = BeginRead(config);
+		mReader.Reset(stream, readerConfig, mNames);
+		return EndRead(Build(mReader, config));
+	}
+
+	/// Clears the document for a read and returns the reader's config, naming the document's copy of the
+	/// source name.
+	XmlReadConfig BeginRead(XmlReadConfig config)
+	{
+		Clear();
+		mSourceName.Set(config.SourceName);
+		var readerConfig = config;
+		readerConfig.SourceName = mSourceName;
+		if (mReader == null)
+			mReader = new XmlReader();
+		return readerConfig;
+	}
+
+	Result<void, XmlParseError> EndRead(Result<void, XmlParseError> result)
+	{
+		// Nothing may keep viewing the caller's input or stream
 		mReader.Reset(StringView());
 		if (result case .Err)
 		{
@@ -302,15 +356,28 @@ public class XmlDocument
 		return ReadFile(path, ReadConfig);
 	}
 
-	/// @brief Replace the document's content with the XML document in a file.
+	/// @brief Replace the document's content with the XML document in a file: loaded whole, or with
+	/// `config.StreamBufferBytes` set, streamed through a buffer of that size.
 	/// @param path The file's path; errors name it unless config.SourceName is set.
-	/// @param config Namespaces, DTD handling, limits and the source name.
+	/// @param config Namespaces, DTD handling, limits, buffer size and the source name.
 	/// @return .Ok, or the first error (IoError if the file cannot be read); the document is then empty.
 	public Result<void, XmlParseError> ReadFile(StringView path, XmlReadConfig config)
 	{
 		var config;
 		if (config.SourceName.IsEmpty)
 			config.SourceName = path;
+		if (config.StreamBufferBytes > 0)
+		{
+			let file = scope FileStream();
+			if (file.Open(path, .Read, .Read) case .Err)
+			{
+				Clear();
+				var error = XmlParseError(.IoError, "Cannot open the file", 0, 0, 0, 0);
+				error.SetSource(config.SourceName);
+				return .Err(error);
+			}
+			return Read(file, config);
+		}
 		let bytes = scope List<uint8>();
 		if (ReadFileBytes(path, config.MaxInputBytes, bytes) case .Err(var error))
 		{
@@ -360,10 +427,13 @@ public class XmlDocument
 		mNamespaces = config.Namespaces;
 		mNodeStack.Clear();
 		mPendingDocTypeNodes.Clear();
+		bool positions = config.MetadataMode != .None;
 		uint32 current = 0;
 		while (true)
 		{
-			switch (Try!(reader.Next()))
+			let event = Try!(reader.Next());
+			int nodesBefore = mNodes.Count;
+			switch (event)
 			{
 			case .StartElement:
 				uint32 id = NewNode(.Element);
@@ -385,12 +455,26 @@ public class XmlDocument
 					attribute.mValue = Own(reader.AttributeValue(i));
 					attribute.mFlags = reader.IsAttributeSpecified(i) ? .None : .Defaulted;
 				}
+				if (positions)
+				{
+					// Attribute ranges by index, after the element's own (events come in source order)
+					RecordRange(mNodeRanges, id, reader, reader.Offset, reader.EndOffset - reader.Offset);
+					for (int i < count)
+					{
+						reader.GetAttributeRange(i, let offset, let end);
+						if (end > 0)
+							RecordRange(mAttributeRanges, (int)element.mAttributeStart + i, reader, offset, end - offset);
+					}
+				}
 				LinkLastChild(current, id);
 				if (current == 0)
 					mRoot = id;
 				mNodeStack.Add(current);
 				current = id;
 			case .EndElement:
+				// The element's range runs through its end tag
+				if (positions)
+					mNodeRanges[current].mLength = (int32)(reader.EndOffset - mNodeRanges[current].mOffset);
 				current = mNodeStack.PopBack();
 			case .Text:
 				AddValueNode(.Text, reader.Value, current);
@@ -438,9 +522,36 @@ public class XmlDocument
 				}
 			case .EndOfDocument:
 				mEncoding = reader.DocumentEncoding;
+				mEncodingWarning = reader.EncodingWarning;
 				return .Ok;
 			}
+			// Text, CDATA, comments, PIs, references, the DOCTYPE: the event's range
+			if (positions && event != .StartElement && mNodes.Count > nodesBefore)
+				RecordRange(mNodeRanges, (uint32)(mNodes.Count - 1), reader, reader.Offset, reader.EndOffset - reader.Offset);
 		}
+	}
+
+	/// Records a source range at `index` of `ranges` (growing it with "no position" records), its line
+	/// and column from the reader.
+	static void RecordRange(List<XmlRangeRecord> ranges, int index, XmlReader reader, int offset, int length)
+	{
+		while (ranges.Count <= index)
+			ranges.Add(default);
+		reader.Locate(offset, let line, let column);
+		ranges[index] = .() { mLine = (int32)line, mColumn = (int32)column, mOffset = (int32)offset, mLength = (int32)length };
+	}
+
+	/// The recorded source range, if the document was read with positions and the item has one.
+	internal bool TryGetRange(List<XmlRangeRecord> ranges, int index, out XmlSourceRange range)
+	{
+		if (index < ranges.Count && ranges[index].mLine > 0)
+		{
+			let r = ranges[index];
+			range = .(r.mLine, r.mColumn, r.mOffset, r.mLength, mSourceName);
+			return true;
+		}
+		range = default;
+		return false;
 	}
 
 	void AddValueNode(XmlNodeKind kind, StringView value, uint32 parent)

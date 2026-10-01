@@ -16,6 +16,9 @@ namespace XmlTester;
 ///       `-rewrite` writes the document in canonical form, reads that back into a new document and
 ///       prints its suite form (the writer must keep the infoset). `-canonical` is accepted for the
 ///       scripts and is the default output.
+///   XmlTester -stream N [options] [file]
+///       the same, reading `file` (or stdin) as a Stream through an N-byte buffer (N >= 16), into the
+///       document or with -events straight from the reader
 ///   XmlTester [-no-ns] -write [-indent N] [file]
 ///       print the document in canonical form (XmlDocument.Write), indented by N spaces if given.
 ///   XmlTester -bench <document|events> <file-or-dir> <min-samples>
@@ -56,12 +59,18 @@ class Program
 		bool rewrite = false;
 		bool write = false;
 		int indent = 0;
+		int streamBuffer = 0;
 		String path = null;
 		for (int i < args.Count)
 		{
 			let arg = args[i];
 			if (arg == "-no-ns")
 				namespaces = false;
+			else if (arg == "-stream" && i + 1 < args.Count && int.Parse(args[i + 1]) case .Ok(let size))
+			{
+				streamBuffer = size;
+				i++;
+			}
 			else if (arg == "-events")
 				events = true;
 			else if (arg == "-rewrite")
@@ -85,8 +94,27 @@ class Program
 				path = arg;
 		}
 
+		var config = XmlReadConfig();
+		config.Namespaces = namespaces;
+		config.StreamBufferBytes = streamBuffer;
+
+		// The input: whole in memory, or with -stream N a Stream read through an N-byte buffer
 		let bytes = scope List<uint8>();
-		if (path != null)
+		let file = scope FileStream();
+		Stream stream = null;
+		if (streamBuffer > 0)
+		{
+			if (path == null)
+				stream = Console.In.BaseStream;
+			else if (file.Open(path, .Read, .Read) case .Ok)
+				stream = file;
+			else
+			{
+				Console.Error.WriteLine($"XmlTester: cannot read {path}");
+				return 2;
+			}
+		}
+		else if (path != null)
 		{
 			if (File.ReadAll(path, bytes) case .Err)
 			{
@@ -101,12 +129,14 @@ class Program
 		}
 		StringView input = .((char8*)bytes.Ptr, bytes.Count);
 
-		var config = XmlReadConfig();
-		config.Namespaces = namespaces;
 		let output = scope String();
 		if (events)
 		{
-			let reader = scope XmlReader(input, config);
+			let reader = scope XmlReader();
+			if (stream != null)
+				reader.Reset(stream, config);
+			else
+				reader.Reset(input, config);
 			if (XmlCanonical.WriteSuiteForm(reader, output) case .Err(let error))
 			{
 				Console.Error.WriteLine(error.ToString(.. scope .()));
@@ -116,7 +146,7 @@ class Program
 		else
 		{
 			let doc = scope XmlDocument();
-			if (doc.Read(input, config) case .Err(let error))
+			if ((stream != null ? doc.Read(stream, config) : doc.Read(input, config)) case .Err(let error))
 			{
 				Console.Error.WriteLine(error.ToString(.. scope .()));
 				return 1;
@@ -132,9 +162,9 @@ class Program
 				let written = scope String();
 				doc.Write(written);
 				let again = scope XmlDocument();
-				if (again.Read(written, config) case .Err(let error))
+				if (again.Read(written, config) case .Err(let rewriteError))
 				{
-					Console.Error.WriteLine(scope $"the canonical form was rejected: {error}");
+					Console.Error.WriteLine(scope $"the canonical form was rejected: {rewriteError}");
 					Console.Error.WriteLine(written);
 					return 3;
 				}
