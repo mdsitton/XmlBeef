@@ -1,0 +1,11 @@
+{
+  "name": "xmlbench",
+  "private": true,
+  "type": "module",
+  "description": "JavaScript harness for the XML comparison benchmark (see ../build.sh); exact versions, the newest on 2026-09-30, locked in package-lock.json",
+  "dependencies": {
+    "fast-xml-parser": "5.11.2",
+    "sax": "1.6.1",
+    "xml2js": "0.6.2"
+  }
+}

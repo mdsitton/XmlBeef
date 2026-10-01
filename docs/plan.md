@@ -1,0 +1,459 @@
+# XmlBeef: implementation plan and handoff
+
+XmlBeef is an XML 1.0 (Fifth Edition) + Namespaces parser and writer for the Beef programming
+language. Its main job is reading data formats from disk — SVG first, then configuration and data
+XML, XHTML, project files, COLLADA, Tiled maps, Office parts — fast, fully checked and with located
+errors, and writing them back, optionally preserving the original formatting. It is the third
+sibling of TomlBeef (`~/development/TomlBeef`, TOML 1.1) and KdlBeef (`~/development/KdlBeef`,
+KDL 2.0) and reuses their design, tooling and, where it fits, their code. KdlBeef is the closer
+model: it is a markup tree with a pull reader under the document, just like XML.
+
+This document is the handoff for the session that starts the implementation. It records what exists,
+what the research found, the requirements, the design to build and the phases to build it in. Read
+with it:
+
+- `docs/spec-reference.md` — the XML 1.0 5th edition and Namespaces rules (productions, every WFC,
+  the DTD and entity rules, encodings, security), what SVG needs, and 133 edge cases worth a test.
+- `docs/implementation-survey.md` — the four existing Beef libraries (built and tested) and 25
+  implementations in eight languages: what to copy, what to avoid.
+- `docs/test-suites.md` — the W3C conformance suite (which release, how to run it, counts, the
+  canonical output format), the SVG corpora, licensing, and the planned test scripts.
+- `bench/compare/results.md` — the benchmark of the existing implementations (§2, §8).
+- `AGENTS.md` — Beef conventions and gotchas, verification and commit rules.
+- KdlBeef's `docs/architecture.md` and TomlBeef's — the designs this plan adapts.
+
+## 1. State of the repository (2026-09-30)
+
+| Path | What it is |
+|---|---|
+| `BeefSpace.toml`, `BeefProj.toml` | Workspace: the `XmlBeef` library (`src/XmlBeef/`) and the `XmlTester` CLI; `TestRelease` and Windows (LLVM toolset) configs as in the siblings |
+| `src/XmlBeef/XmlVersion.bf` | Placeholder public type |
+| `src/XmlBeef/tests/XmlSmokeTests.bf` | One smoke test so `beefbuild -test` runs (1/1) |
+| `XmlTester/src/Program.bf` | Stub; becomes the conformance and benchmark CLI (phase 1) |
+| `tests/fetch-suites.sh` | Fetches, at pinned versions with SHA-256 checks, the W3C XML Conformance Test Suite 20130923, the W3C SVG 1.1 Second Edition test suite (606 SVGs) and the resvg test SVGs (1,784) into `tests/suites/` (git-ignored; the licenses forbid vendoring, `test-suites.md` §8) |
+| `bench/compare/` | The comparison benchmark (§2, §8): pinned clones, a harness per language, inputs, `run.sh` with the siblings' measurement rule and `ONLY=` partial reruns |
+| `docs/` | This plan, the spec reference, the implementation survey, the test-suite reference, `status.md` |
+
+Nothing parses XML yet.
+
+## 2. What the research says
+
+### 2.1 The existing Beef libraries
+
+None is reusable (`implementation-survey.md`, "The existing Beef libraries", with a results table
+over 13 tricky inputs):
+
+- **Beef-Lang-XML** (2021, 513 lines) builds, but is a toy: no entity, CDATA or end-of-line
+  handling, end tags never checked, text split into words.
+- **Xml-Beef** (2021, a VerySimpleXml port) builds, but loops forever with growing memory on any tag
+  longer than 4,096 bytes (a real 595 KB Inkscape SVG: over 2 minutes and 3 GB), drops text without
+  whitespace, and its writer segfaults without an XML declaration.
+- **BeefXml** (2025, 5.6k lines) is the only serious attempt: its pull reader counts real SVGs
+  correctly, but its document builder asserts on every document, Release builds fail, every parse
+  error calls `Debug.Break()`, and it opens external DTDs and entities from disk by default. Worth
+  keeping: the enum-event pull-reader shape and comptime-generated character classes (as tables).
+- **BeefFNT** does not build and only wraps Xml-Beef.
+
+So Beef has no working XML library today; XmlBeef starts from the siblings, not from these.
+
+### 2.2 The benchmark
+
+33 configurations of 24 implementations in nine languages (C, C++, Rust, Go, Java, C#, Python,
+JavaScript, Zig) plus the three Beef libraries that build, timed with the siblings' rule on eight
+inputs of 10–15 MB:
+
+- **svg-icons:** 17,387 real icon files (Material Design Icons, Tabler, Twemoji), one cell parsing
+  every file, so per-file overhead counts.
+- **svg-artwork:** Inkscape's About-screen artworks.
+- **svg-generated:** Illustrator-style, with an internal DTD whose entities are used in attribute
+  values (`xmlns="&ns_svg;"`).
+- **records** (XMark-like), **book** (text-heavy XHTML), **osm** (attribute-heavy), **atom**
+  (namespace-heavy), **book-utf16** (UTF-16LE).
+
+Every harness reports a checksum (elements, attributes, attribute-value and text lengths after
+decoding) checked against libxml2's; a wrong one is FAIL.
+
+**No timed run exists yet**: the machine stayed loaded (load average 5–10) for the whole session, so
+only a one-sample smoke table was taken (`bench/compare/results-smoke.md`, labeled unreliable). Its
+rough picture:
+
+- Document builders: pugixml leads at ~390–2,300 MB/s, then roxmltree 170–725, the JDK DOM, libxml2
+  and lxml 50–330.
+- Pull/event readers: xmlparser (a tokenizer) 375–750, TurboXml 240–900, quick-xml 280–680, Aalto
+  250–560; expat, Woodstox, the JDK readers and .NET's XmlReader 100–530.
+- The Beef libraries: 40–55 MB/s, and every one FAILs its checksum on most inputs.
+
+Published references agree (`implementation-survey.md` "Speed references"): pugixml ~850 MB/s,
+RapidXML ~700, expat and libxml2 SAX ~150, libxml2 DOM ~65; quick-xml 250–750 and roxmltree 215–370
+on an M1.
+
+**Correctness, which does not depend on load, is the bigger finding.** On well-formed inputs:
+
+- **svg-generated** (internal DTD entities, what Illustrator writes) is rejected outright by
+  quick-xml, Go's encoding/xml and etree and xmlquery, Aalto, TurboXml, sax-js, xml2js, zig-xml and
+  XmlParser; the JDK parsers stop at their 100,000-byte entity-size limit and fast-xml-parser at its
+  expansion limit; **pugixml leaves the references unexpanded** (wrong values); BeefXml tries to open
+  the external DTD URL as a file. Only libxml2, expat, Xerces-C, roxmltree, xml-rs, xmltree,
+  Woodstox, the three .NET models, ElementTree, lxml and nektro/zig-xml read it correctly.
+- fast-xml-parser leaves numeric character references undecoded by default; xmltree keys attributes
+  by local name (`xml:lang` and `lang` collide); nine libraries cannot read UTF-16 at all.
+
+So the fast libraries that read real SVG correctly are roxmltree, expat and libxml2; pugixml is the
+speed bar for a DOM but not a correct one. **The target for XmlBeef: roxmltree-or-better document
+speed and quick-xml-class reader speed, while passing every input here and the whole W3C suite.**
+Set the numeric targets from the timed run (§8).
+
+### 2.3 The test suite
+
+The newest W3C XML Conformance Test Suite is **20130923** (2,585 cases); there is nothing newer and
+no maintained fork (`test-suites.md` §1). The 2002 release predates the Fifth Edition: 309 of its
+cases expect the wrong result for a 5th-edition parser. XmlBeef's selection (XML 1.0 5th edition +
+Namespaces 1.0) is **2,001 cases**; without reading external entities: **957 must be accepted**
+(valid and invalid, since a non-validating parser accepts invalid documents), **951 must be
+rejected**, **262 have canonical output to compare byte for byte**, 66 not-wf cases may pass either
+way (their error is in an unread external entity) and 27 error cases are logged only. The skip list
+starts empty; one catalog path bug (the nine `hst-*` cases) is remapped by the runner. Real-world
+corpora: 2,389 SVGs from the W3C SVG 1.1 suite and resvg, all well-formed, including a
+Windows-1251 file and SVGs built from internal DTD entities.
+
+## 3. Requirements
+
+The goal set by the author: fast, high-quality code; a feature set like TomlBeef's and KdlBeef's;
+reading data formats from disk with SVG as the main case. "Must" is the phase 1–5 scope.
+
+| Feature | Priority | Notes |
+|---|---|---|
+| Full XML 1.0 5th edition well-formedness + Namespaces 1.0, checked by default | Must | Every WFC and NSC (`spec-reference.md`); speed from fast paths, never from skipping checks (the survey: every library that skips checks has correctness bugs) |
+| W3C suite: all 957 accepted, all 951 rejected, 262 canonical outputs byte-exact | Must | `test-suites.md` §5–6; skip/expected-failure lists checked in, a listed failure that starts passing fails the run |
+| Internal DTD subset: entity declarations and expansion, ATTLIST defaults and attribute-type normalization, notations kept | Must | Real SVG needs it (Illustrator: `xmlns="&ns_svg;"`); the suite's canonical outputs need defaults, normalization and notations. Entities and defaults apply before namespace resolution |
+| Safe by default: never fetch anything external; entity expansion bounded (depth, bytes, amplification) | Must | One `XmlReadConfig` for every entry point; external entities and the external subset are reported (skipped entity), not read |
+| Encodings: UTF-8 (fast path), UTF-16 LE/BE (transcoded at the cursor), ISO-8859-1, US-ASCII, Windows-1252; declaration checked against detection | Must | Everything else a clean located error; a converter hook later (§9) |
+| Pull reader (`XmlReader`) under the document builder | Must | StAX/zig-xml style events, views valid until the next call, indexed attributes; zero allocations per event on the fast path |
+| Document model (`XmlDocument`, node IDs, handles) | Must | KdlBeef's ID-based node table; elements, text, CDATA, comments, PIs, the prolog and DOCTYPE; interned names |
+| Canonical writer + the suite's canonical form | Must | Minimal escaping, `\n`, optional indentation that never touches mixed content; James Clark canonical form for the suite |
+| Located errors (line, column, offset, length, source name) | Must | TomlBeef/KdlBeef `ParseError` model, computed on demand |
+| Positions sidecar | Must | "path at icons.svg:12:5" diagnostics |
+| Resource limits with safe defaults and a `Huge` preset | Must | Depth, nodes, attributes per element, name/text/token bytes, namespace bindings, entity limits, input size |
+| Streams: `Read(Stream)` through a bounded window | Must | KdlBeef's buffered cursor; scans resume at the window end (expat's CVE-2023-52425 lesson) |
+| PreserveStyle: unchanged documents write back byte for byte; edits regenerate only what changed | Must | The survey's XML slot list (§4.9); the bar is byte-exact on every accepted suite input and the SVG corpora |
+| Mutation API | Must | KdlBeef's handle API: add, insert, move, remove, set attribute/text |
+| Namespace-aware lookups | Must | `Find(ns, local)`, `TryGetAttribute(ns, local)`; resolved (namespace id, local id) with the prefix kept |
+| Compile-time typed mapping (`[XmlObject]`) | Should | KdlBeef's generator with XML roles (§4.12) |
+| `ReadSubtree` / skip-element on the reader | Should | Huge files: build a document for one element at a time |
+| Namespace-off mode | Should | The suite's nine `NAMESPACE="no"` cases; colon names as plain names |
+| Collect-errors with recovery | Later | Harder for XML than KDL (resynchronize at `<`, synthesize end tags); decide after phase 5 |
+| Streaming writer (`XmlWriter` emitter) | Later | Generate large XML without a document |
+| External entity resolver callback (opt-in, local files) | Later | Enables the suite's second run (1,017 rejects, 379 outputs) |
+| XML 1.1 | Not planned | Nobody uses it (expat, .NET, browsers don't support it); `version="1.x"` is read as 1.0 as the 5th edition says |
+| Validation (DTD/XSD), XInclude, XPath, XSLT | Not planned | A small path subset for lookups only if the API asks for it |
+
+## 4. Design
+
+### 4.1 Layers
+
+```
+bytes ─► encoding detection (BOM, Appendix F) ─► transcoding to UTF-8 if needed ─► UTF-8 validation
+      ─► cursor (contiguous, or a bounded stream window)
+      ─► XmlReaderCore<TCursor>: tokenizer + well-formedness state machine, entity frames,
+         namespace binding stack, interned names
+      ─► XmlReader (public pull events)
+             ├─► document builder ─► XmlDocument (+ Positions / PreserveStyle sidecar)
+             ├─► [XmlObject] generated readers (straight from events)
+             └─► user code that wants no document (skimming large files)
+XmlDocument ─► canonical writer | preserving writer | suite canonical form
+```
+
+KdlBeef's shape. Nothing is layered over the tree (libxml2's xmlReader) or over callbacks; a SAX-style
+`Parse<THandler>` adapter over the reader is cheap if it is ever wanted.
+
+### 4.2 Cursor, encodings, validation
+
+- Port KdlBeef's `KdlCursor.bf` (401 lines): the in-memory cursor and the buffered stream cursor
+  under one interface, reader core generic over it (`KdlReaderCore<TCursor>` pattern), absolute
+  offsets, nested marks and retained spans, `MaxTokenBytes`, at least 8 readable bytes past the
+  window end so SWAR scans need no tail loop.
+- Refill only when a scan hits the window's end, and resume the scan there, never from the start of
+  the construct (quadratic rescans are expat's CVE-2023-52425).
+- Encoding: detect by BOM and the first four bytes (Appendix F); UTF-16 and the single-byte
+  encodings are transcoded to UTF-8 at the cursor (one up-front conversion for memory input, a
+  transcoding window for streams); UCS-4 and EBCDIC are a clear error. The `encoding=` declaration
+  is then checked against what was detected. Positions are reported in UTF-8 terms plus line and
+  column.
+- Validate UTF-8 once, before the tokenizer sees the bytes (KdlBeef's `FindInvalid`, 8 ASCII bytes
+  at a time). The `Char` production then reduces to a control-byte test in the scanners' slow path
+  plus U+FFFE/U+FFFF.
+- End-of-line normalization (`\r\n`, lone `\r` → `\n`) happens while copying decoded text, never as
+  a separate pass; text without `\r` or `&` stays a view (§4.5).
+
+### 4.3 Scanning
+
+- One 256-entry class table per scanner state, generated at comptime: text stops at `< & \r ]` and
+  controls; attribute values at the quote, `< & \r \n \t` and controls; comments at `-`; CDATA at
+  `]`; PIs at `?`. Long runs use the siblings' 8-byte SWAR `ScanRun`.
+- Rare constraints are checked only where they can occur: `]]>` in text after a `]`, `--` in
+  comments at each `-`, the full NameStartChar/NameChar ranges only for bytes ≥ 0x80 (an ASCII table
+  and a cold range search).
+- End tags compare bytes with the open element's name (TurboXml); they are not parsed and interned
+  again.
+- Duplicate attributes: compare interned ids (n² up to ~16 attributes, a version-stamped hash above);
+  again by (namespace, local) after namespace resolution.
+
+### 4.4 Names
+
+- Names are interned per document into `XmlNameId` (`uint32`): an entry holds the qualified name,
+  prefix and local part (views into the store) and a hash. SVG repeats a few dozen names thousands
+  of times: comparisons become integer compares and memory drops.
+- The reader keeps its own intern table so duplicate, end-tag and namespace checks allocate nothing;
+  the document builder adopts it (one table, not a copy) when the reader belongs to a document read.
+- A resolved name is (namespace id, local id) with the prefix id kept, for writing and round trips.
+- The hash is seeded and never global; names are bounded by `MaxNameBytes`.
+
+### 4.5 Text and attribute values
+
+- Views into the window when nothing needs decoding (no `&`, no `\r`, and for attributes no
+  `\t \n`); otherwise decoded into a reusable buffer (KdlBeef's decode buffers). Attribute values
+  get §3.3.3 normalization, and tokenized-type normalization when the internal subset declares the
+  attribute's type.
+- Character and entity references are merged into the surrounding text event in normal mode; in
+  PreserveStyle the reader also reports the raw source slice so the writer keeps `&#x41;` vs `A`.
+- Text and CDATA are separate events and separate node kinds (never merged, unlike pugixml and
+  roxmltree). Whitespace-only text is flagged during the scan, so indentation can be skipped cheaply
+  without trimming anything by default.
+- The document copies decoded text into its arena (TomlBeef's `NewString`: plain bytes, `StringView`
+  out). An element with exactly one text child can store it inline (XLinq), to be measured.
+
+### 4.6 DTD and entities
+
+- `DtdMode { Prohibit, Ignore, Internal }`, default `Internal`: parse the internal subset —
+  `<!ENTITY>` (general and parameter, parsed and unparsed), `<!ATTLIST>` (defaults and types),
+  `<!NOTATION>`, and syntax-check `<!ELEMENT>` as far as the not-wf cases require. Conditional
+  sections are external-subset only, so they are a well-formedness error here.
+- The §4.4 treatment table and §4.5 replacement-text construction are implemented exactly
+  (`spec-reference.md` §7.3–7.4, Appendix D): character references in entity values are expanded
+  when the entity is declared, general entity references when it is used; parameter entities only
+  between declarations in the internal subset.
+- Expansion pushes an input frame over the replacement text (a stack of windows read by the same
+  core), never splices text; it is iterative, with a loop check (No Recursion) and the limits:
+  `MaxEntityDepth` (default 20, libxml2's), `MaxEntityExpansionBytes` (default 10 MB, .NET's), and
+  an amplification ratio after a threshold (libxml2: 5× with 20 bytes per reference; expat: 100×
+  after 8 MiB — pick after measuring the corpora; default proposal 10× after 1 MB).
+- Entity Declared: fatal without a DTD, with only an internal subset without parameter-entity
+  references, or with `standalone="yes"`; otherwise (an external subset or parameter entity was not
+  read) an undeclared reference is a **skipped entity** reported to the reader and kept as a
+  reference node, not an error (XHTML's `&nbsp;`). Declarations after an unread external parameter
+  entity are ignored unless `standalone="yes"` (`valid-sa-097`).
+- External entities and the external subset: reported (public/system IDs kept for writing and for
+  a later resolver), never opened.
+
+### 4.7 Namespaces
+
+- A binding stack in the reader: one byte arena plus (prefix id, URI id, depth) records, popped by
+  truncation with a deferred pop so `EndElement` still resolves; resolution is a reverse scan (few
+  bindings in practice), cached per interned name.
+- Every NSC: unbound prefixes, the `xml`/`xmlns` reservations, `xmlns:p=""` in 1.0, colons in local
+  parts and in entity/PI/notation names, duplicate (namespace, local) attributes. The default
+  namespace does not apply to attributes.
+- Cost: nothing for unprefixed elements without `xmlns` attributes.
+- The document stores each element's namespace id and its own declarations, never a copy of the
+  in-scope set.
+- Namespace-off mode (should): names with colons are plain names; used by the suite's nine cases.
+
+### 4.8 Document model
+
+- `XmlDocument` owns everything through a store (TomlBeef/KdlBeef `DocumentStore`: a recycled
+  `BumpAllocator`, arena strings as views, `ReleaseCachedMemory`).
+- Nodes are IDs (`XmlNodeId`, `uint32`, 0 invalid) into one record table with parent / first child /
+  last child / next / previous sibling links and a child count (KdlBeef). Kinds: document, element,
+  text, CDATA, comment, PI, entity reference (a skipped or preserved reference), plus the prolog
+  items (XML declaration, DOCTYPE) hanging off the document node.
+- `XmlNode` is a 16-byte handle (document + ID) with properties that read and write through
+  (`node.Name`, `node.Parent`, `node.Children`, `node.TryGetAttribute(...)`).
+- Attributes: one document-wide ordered table, each element holding a start and count (KdlBeef's
+  entries); records hold name id, value and flags (had references, raw view, defaulted from the
+  DTD). No per-element index: lookups scan (KdlBeef measured 28–64 ns for 4–16 entries; SVG elements
+  carry 2–15 attributes).
+- Lookups (KdlBeef): `Find(name)`, `Find(ns, local)`, `Children.Named`, `Descendants`,
+  `TryGetAttribute` with typed getters (`TryGetInt32`, `TryGetDouble`, `TryGetBool`), `Text`
+  (concatenated child text), `InnerText`. No query language to start with.
+- Mutation (KdlBeef): `AddElement`, `InsertBefore/After`, `Move*`, `Remove`, `SetAttribute`,
+  `RemoveAttribute`, `SetText`, `Rename`.
+
+### 4.9 Metadata sidecar: Positions and PreserveStyle
+
+`MetadataMode { None, Positions, PreserveStyle }` in `XmlReadConfig`, as in the siblings: node IDs
+key a sidecar, empty in `None`. PreserveStyle uses KdlBeef's mechanism (per-event source slices,
+copied into sidecar records only in this mode; the writer reuses a slice while its node is clean):
+
+- the prolog as text: BOM, the XML declaration exactly as written, the DOCTYPE with its internal
+  subset verbatim, and comments, PIs and whitespace around the root;
+- start tags: whitespace before each attribute, around `=` and before `>`/`/>` (Inkscape writes one
+  attribute per line), the quote character, the raw value (reference spellings);
+- `<a/>` vs `<a></a>` and `<a />` whitespace; `</a >` whitespace;
+- CDATA vs escaped text, raw text (`&gt;` vs `>`, `&#xA0;`, CRLF), whitespace-only nodes, comments,
+  PIs;
+- references to declared entities stay references (`&ns_svg;` is not written as its expansion).
+
+A changed value drops its raw slice and is regenerated in the original's form (quote kept, minimal
+escaping); new attributes follow the element's layout (same line, or the attribute indent of a
+multi-line tag). Bar: every accepted suite input and every corpus SVG writes back byte for byte;
+edits keep neighbors untouched.
+
+### 4.10 Errors
+
+`XmlParseError { Kind, Message, Line, Column, Offset, Length, Source }` as the siblings'
+(per-thread message buffer, no cleanup, `source:line:column: message`), line and column computed on
+demand. Kinds are an enum; messages name the construct and the rule ("`--` is not allowed inside a
+comment", "prefix `xlink` is not bound"). Golden messages for a representative set of not-wf cases.
+Errors are sticky; collect-errors is later (§3).
+
+### 4.11 Writers
+
+- Canonical: double quotes, minimal escaping (`&lt; &amp;`, `&gt;` after `]]`, `&quot;` in
+  attributes, `&#9; &#10; &#13;` in attributes so they survive normalization), `<a/>` for empty
+  elements, `\n`, optional indentation that never touches mixed content, UTF-8 output.
+- Suite canonical form (James Clark's, with Sun's notation block; `test-suites.md` §4): used by
+  `XmlTester` for the conformance run.
+- Preserving writer: §4.9.
+
+### 4.12 Typed mapping (`[XmlObject]`)
+
+KdlBeef's comptime generator (`KdlSerializerCodeGen.bf`, `KdlBind.bf`, 2,260 lines) with XML roles:
+
+| Member | Default role | Override |
+|---|---|---|
+| Scalar (numbers, bool, string, enums, date/time via converter) | Attribute, named after the member | `[XmlElement]` for `<name>value</name>`, `[XmlText]` for the element's text |
+| `[XmlObject]` type | Child element named after the member | `[XmlName]` |
+| `List<[XmlObject]>` | Repeated child elements named after the item type, unwrapped | `[XmlArray("wrapper")]` for a wrapper element |
+| Polymorphic children | `[XmlChildren]` dispatch by element name (KdlBeef's `[KdlChildren]`) | |
+| Namespaces | Per type (`[XmlObject(Namespace = "...")]`) and per member | |
+
+Names match by interned id; unknown attributes and elements are ignored, with an opt-in strict mode;
+numbers are overflow-checked, text is never auto-typed; naming policy (as declared by default, as in
+TomlBeef, with kebab/camel/lower options since SVG attributes are `stroke-width`); writing updates a
+PreserveStyle document in place.
+
+### 4.13 Resource limits (`XmlReadConfig`)
+
+Defaults (proposals, to confirm on the corpora): `MaxInputBytes` 0 (unlimited), `MaxDepth` 256,
+`MaxAttributesPerElement` 4,096, `MaxNameBytes` 50,000, `MaxTextBytes` 10 MB, `MaxTokenBytes`
+(streams) 10 MB, `MaxNamespaceBindings` 1,024, `MaxNodes` 0, and the entity limits of §4.6. A `Huge`
+preset raises them (libxml2 `XML_PARSE_HUGE`). Content parsing is iterative, so depth costs a frame
+record, not stack.
+
+### 4.14 Public API sketch
+
+```beef
+let doc = scope XmlDocument();
+Try!(doc.ReadFile("icon.svg"));                         // or Read(StringView), ReadBytes, Read(Stream)
+let svg = doc.Root;                                     // XmlNode handle
+if (svg.TryGetAttribute("viewBox", let viewBox)) ...
+for (let path in svg.Descendants.Named("path"))
+	Console.WriteLine(path.GetAttribute("d"));
+
+let reader = scope XmlReader();                         // no document
+Try!(reader.Reset(stream, .() { MaxDepth = 64 }));
+while (Try!(reader.Next()) case let ev && ev != .EndOfDocument)
+	if (ev == .StartElement && reader.LocalName == "path") ...
+```
+
+## 5. Porting table
+
+| Source file | Use in XmlBeef | Changes |
+|---|---|---|
+| KdlBeef `KdlCursor.bf` (401) | `XmlCursor.bf` | XML stop classes; transcoding window for UTF-16/single-byte encodings |
+| KdlBeef `KdlChar.bf` (535) | `XmlChar.bf` | UTF-8 validation as is; XML Char, NameStartChar/NameChar tables and ranges, whitespace |
+| KdlBeef `KdlReader.bf` (1,508) structure | `XmlReaderCore`, `XmlReader` | Generic core, sticky errors, decode buffers, marks; XML tokenizer, entity frames, namespace stack |
+| KdlBeef `KdlDocumentStore.bf` (97), TomlBeef `TomlTextArena.bf` | `XmlDocumentStore.bf` | Name table added |
+| KdlBeef `KdlDocument.bf`, `KdlNode*.bf`, `KdlDocument.Mutation.bf` (~1,850) | `XmlDocument`, `XmlNode*` | Node kinds, attributes instead of entries, namespaces |
+| KdlBeef `KdlDocument.Style.bf` (423) | `XmlDocument.Style.bf` | XML slot list (§4.9) |
+| KdlBeef `KdlCanonical.bf` (430) | `XmlCanonical.bf` | XML escaping rules; suite canonical form |
+| KdlBeef `KdlError.bf` (172), `KdlSourceRange.bf`, `KdlReadConfig.bf` | same, `Xml` names | XML error kinds, limits, `DtdMode`, encodings |
+| KdlBeef `KdlSerializerCodeGen.bf`, `KdlBind.bf`, `KdlObjectAttribute.bf`, `IKdlSerializable.bf`, `KdlSerializer.bf` (~2,600) | `[XmlObject]` | Roles of §4.12 |
+| KdlBeef `test-leaks.sh`, `test-roundtrip.sh`, `test-kdl-spec.sh` | `test-leaks.sh`, `test-roundtrip.sh`, `test-xml-conformance.sh`, `test-svg-corpus.sh` | `test-suites.md` §9 |
+| TomlBeef `bench/compare/merge.sh`, `update-tomlbeef.sh` | done in `bench/compare/` | |
+
+Port a file when the phase needs it and test it in XmlBeef's own suite; no package dependency on the
+siblings.
+
+## 6. Phases
+
+Each phase ends with Debug and Release tests, the leak check, the suite scripts on both binaries and
+the Windows tests (`AGENTS.md`), committed.
+
+**Phase 1 — Reader core and conformance runner.** Port the cursor, UTF-8 validation and char
+tables; encoding detection with UTF-8/UTF-16; the tokenizer and well-formedness state machine
+(elements, attributes, text, CDATA, comments, PIs, XML declaration, DOCTYPE with the internal subset,
+entities, namespaces); `XmlReader` events; `XmlTester` prints the suite's canonical form from events;
+`test-xml-conformance.sh` reads the catalogs (`test-suites.md` §9). Done when the 951 not-wf cases are
+rejected, the 957 accepted, and the 262 canonical outputs match.
+
+**Phase 2 — Document and canonical writer.** Store, name table, node table, attributes, the builder
+over reader events, canonical writer, lookups; `XmlTester` reads through the document (events kept as
+a second mode, both checked by the script); `test-svg-corpus.sh` over the 2,389 SVGs.
+
+**Phase 3 — Speed.** Join `bench/compare` (a `beef` harness and `XmlTester -bench`), profile, fast
+paths. Numeric targets come from the timed run (§2.2); the working targets: the event reader in
+quick-xml's class, the document at or above roxmltree (the fastest correct DOM), several times
+libxml2 and expat, all while passing every benchmark input and the W3C suite (pugixml is faster but
+skips checks and leaves DTD entities unexpanded).
+
+**Phase 4 — Errors, positions, limits, streams, encodings.** Golden messages, Positions sidecar,
+every limit with tests, `Read(Stream)` (all input paths produce identical documents and errors),
+the single-byte encodings.
+
+**Phase 5 — PreserveStyle and mutation.** Sidecar slots of §4.9, preserving writer, mutation API;
+byte-exact round trips of every accepted suite input and every corpus SVG; edits keep neighbors.
+
+**Phase 6 — `[XmlObject]`.** The generator with §4.12's roles; a typed benchmark against quick-xml +
+serde, Go `encoding/xml` Unmarshal and .NET `XmlSerializer`.
+
+**Phase 7 — Extras, as needed.** `ReadSubtree`, namespace-off mode (if not done in phase 1),
+collect-errors, the streaming writer, the external-entity resolver.
+
+## 7. Testing
+
+- The W3C suite at the strengths of §2.3, with `tests/xmlconf/skip.txt` and
+  `tests/xmlconf/expected-failures.txt` (a listed failure that starts passing fails the run).
+- The SVG corpora: every file parses; with PreserveStyle every file round-trips byte for byte.
+- `[Test]` units per area from `spec-reference.md` §16 (each line is a test), Debug and Release;
+  LeakSanitizer; Windows via `~/development/beef-proton`.
+- Security tests: billion laughs, quadratic blowup, deep nesting, huge attributes, external entity
+  references (must not be opened), each a located limit error.
+- The benchmark inputs double as large-input tests (checksums must match the reference).
+
+## 8. Rerunning the benchmark
+
+```bash
+tests/fetch-suites.sh                    # W3C XML suite, SVG corpora
+cd bench/compare
+./fetch.sh && ./build.sh                 # pinned clones and toolchains; every harness into bin/
+./gen-inputs.py                          # inputs/
+./run.sh > results.md && ./plot.py      # 2–3 h; refuses to run above load average 2 (FORCE=1 overrides)
+ONLY='XmlBeef.*' ./run.sh                # later: remeasure only XmlBeef, merged into results.md
+```
+
+## 9. Decisions and open questions for the author
+
+Decided in this plan (from the research; override any):
+
+1. **XML 1.1**: not supported; `version="1.1"` documents are read with 1.0 rules (the 5th edition's
+   own rule for unknown 1.x versions).
+2. **DTD**: the internal subset is parsed and applied (entities, ATTLIST defaults and types,
+   notations); nothing external is ever read; no validation.
+3. **Encodings**: UTF-8, UTF-16, ISO-8859-1, US-ASCII, Windows-1252; others are an error.
+4. **Checks**: full well-formedness by default; no lenient mode until a measurement asks for one.
+5. **PreserveStyle**: byte-exact (KdlBeef's bar), since the reader hands out source slices.
+6. **Typed mapping**: scalars are attributes by default.
+
+Open:
+
+1. **Encoding conflicts**: a BOM that contradicts `encoding=` is fatal by the spec (`hst-lhs-007/008`)
+   but accepted by libxml2 (and expat for 007). Strict (proposed) or lenient?
+2. **More encodings**: resvg's corpus has a Windows-1251 SVG. Add a few more tables (Windows-125x,
+   ISO-8859-x) or a user converter hook?
+3. **Error columns**: in code points (proposed, as the siblings) or bytes?
+4. **Entity amplification defaults** (§4.6): libxml2 (5×) is strict, expat (100× after 8 MiB) loose;
+   proposed 10× after 1 MB, to confirm on the corpora.
+5. **Typed-mapping naming default**: as declared (TomlBeef) or kebab-case (KdlBeef; SVG's
+   `stroke-width`)?
+6. **Collect-errors**: needed for the author's tools (editor diagnostics), or later?

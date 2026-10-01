@@ -1,0 +1,14 @@
+FileVersion = 1
+
+# The existing Beef XML libraries in one program, built by the same compiler with the same settings
+# (beefbuild -config=Release, see ../build.sh beef). The libraries are the pinned clones in ../deps;
+# libs/ holds project files for the two that need one here (Beef-Lang-XML ships none; BeefXml's own
+# includes src/Json, which does not build in Release). Xml-Beef's own project file is used as is.
+[Workspace]
+StartupProject = "XmlBeefBench"
+
+[Projects]
+XmlBeefBench = {Path = "."}
+Beef-Lang-XML = {Path = "libs/Beef-Lang-XML"}
+BeefXml = {Path = "libs/BeefXml"}
+Xml-Beef = {Path = "../deps/Xml-Beef"}

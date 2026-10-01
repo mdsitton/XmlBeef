@@ -1,0 +1,15 @@
+FileVersion = 1
+
+# HorseTrain/Beef-Lang-XML ships a single XML.bf and no project file; this one includes the pinned clone
+[Project]
+Name = "Beef-Lang-XML"
+TargetType = "BeefLib"
+
+[Dependencies]
+corlib = "*"
+
+[[ProjectFolder.Items]]
+Type = "Folder"
+Path = "../../../deps/Beef-Lang-XML"
+Name = "Beef-Lang-XML"
+AutoInclude = true

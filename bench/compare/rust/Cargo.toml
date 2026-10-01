@@ -1,0 +1,18 @@
+[package]
+name = "xmlbench"
+version = "0.1.0"
+edition = "2021"
+
+# Exact versions (the newest on 2026-09-30), locked with their dependencies in Cargo.lock
+[dependencies]
+quick-xml = "=0.42.0"
+roxmltree = "=0.21.1"
+xmlparser = "=0.13.6"
+# xml-rs: published as `xml` since 1.0 (the `xml-rs` 1.0.0 crate only re-exports it)
+xml = "=1.4.0"
+xmltree = "=0.12.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

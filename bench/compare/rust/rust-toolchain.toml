@@ -1,0 +1,4 @@
+# The comparison is built with a pinned Rust (the one KdlBeef's and TomlBeef's comparisons use)
+[toolchain]
+channel = "1.98.1"
+profile = "minimal"

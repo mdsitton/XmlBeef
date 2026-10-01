@@ -1,0 +1,22 @@
+FileVersion = 1
+
+# Rune-Magic/BeefXml's sources from the pinned clone, without src/Json: its JsonReader.bf:98 has a
+# Debug.Assert with a side effect (PeekNext), which Release compiles out, so the library builds in Debug
+# only. The XML parts do not use the JSON code.
+[Project]
+Name = "BeefXml"
+TargetType = "BeefLib"
+DefaultNamespace = "Xml"
+
+[Dependencies]
+corlib = "*"
+
+[[ProjectFolder.Items]]
+Type = "Folder"
+Path = "../../../deps/BeefXml/src"
+Name = "BeefXml"
+AutoInclude = true
+
+[[ProjectFolder.Items.Items]]
+Type = "IgnoreFolder"
+Name = "Json"

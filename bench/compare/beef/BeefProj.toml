@@ -1,0 +1,11 @@
+FileVersion = 1
+
+[Project]
+Name = "XmlBeefBench"
+StartupObject = "XmlBeefBench.Program"
+
+[Dependencies]
+corlib = "*"
+Beef-Lang-XML = "*"
+BeefXml = "*"
+Xml-Beef = "*"
