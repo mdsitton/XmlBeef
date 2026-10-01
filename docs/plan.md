@@ -127,7 +127,7 @@ reading data formats from disk with SVG as the main case. "Must" is the phase 1�
 | W3C suite: all 957 accepted, all 951 rejected, 262 canonical outputs byte-exact | Must | `test-suites.md` §5–6; skip/expected-failure lists checked in, a listed failure that starts passing fails the run |
 | Internal DTD subset: entity declarations and expansion, ATTLIST defaults and attribute-type normalization, notations kept | Must | Real SVG needs it (Illustrator: `xmlns="&ns_svg;"`); the suite's canonical outputs need defaults, normalization and notations. Entities and defaults apply before namespace resolution |
 | Safe by default: never fetch anything external; entity expansion bounded (depth, bytes, amplification) | Must | One `XmlReadConfig` for every entry point; external entities and the external subset are reported (skipped entity), not read |
-| Encodings: UTF-8 (fast path), UTF-16 LE/BE (transcoded at the cursor), ISO-8859-1, US-ASCII, Windows-1252; declaration checked against detection | Must | Everything else a clean located error; a converter hook later (§9) |
+| Encodings: detection (BOMs, Appendix F, the declaration) ported from StrikeCore's `DetectEncoding`; UTF-8 fast path; UTF-16/32 and table-driven single-byte encodings (Windows-125x, ISO-8859-x, KOI8, …) transcoded at the cursor | Must | §9 item 7: a converter hook for legacy multi-byte encodings, an opt-in Windows-1252 fallback for undeclared non-UTF-8; BOM conflicts as most parsers (§9 item 6) |
 | Pull reader (`XmlReader`) under the document builder | Must | StAX/zig-xml style events, views valid until the next call, indexed attributes; zero allocations per event on the fast path |
 | Document model (`XmlDocument`, node IDs, handles) | Must | KdlBeef's ID-based node table; elements, text, CDATA, comments, PIs, the prolog and DOCTYPE; interned names |
 | Canonical writer + the suite's canonical form | Must | Minimal escaping, `\n`, optional indentation that never touches mixed content; James Clark canonical form for the suite |
@@ -141,7 +141,7 @@ reading data formats from disk with SVG as the main case. "Must" is the phase 1�
 | Compile-time typed mapping (`[XmlObject]`) | Should | KdlBeef's generator with XML roles (§4.12) |
 | `ReadSubtree` / skip-element on the reader | Should | Huge files: build a document for one element at a time |
 | Namespace-off mode | Should | The suite's nine `NAMESPACE="no"` cases; colon names as plain names |
-| Collect-errors with recovery | Later | Harder for XML than KDL (resynchronize at `<`, synthesize end tags); decide after phase 5 |
+| Collect-errors with recovery | Must (before integration) | Harder for XML than KDL (resynchronize at `<`, synthesize end tags; KirillOsenkov/XmlParser is the model); phase 7 at the latest |
 | Streaming writer (`XmlWriter` emitter) | Later | Generate large XML without a document |
 | External entity resolver callback (opt-in, local files) | Later | Enables the suite's second run (1,017 rejects, 379 outputs) |
 | XML 1.1 | Not planned | Nobody uses it (expat, .NET, browsers don't support it); `version="1.x"` is read as 1.0 as the 5th edition says |
@@ -174,11 +174,14 @@ KdlBeef's shape. Nothing is layered over the tree (libxml2's xmlReader) or over 
   window end so SWAR scans need no tail loop.
 - Refill only when a scan hits the window's end, and resume the scan there, never from the start of
   the construct (quadratic rescans are expat's CVE-2023-52425).
-- Encoding: detect by BOM and the first four bytes (Appendix F); UTF-16 and the single-byte
-  encodings are transcoded to UTF-8 at the cursor (one up-front conversion for memory input, a
-  transcoding window for streams); UCS-4 and EBCDIC are a clear error. The `encoding=` declaration
-  is then checked against what was detected. Positions are reported in UTF-8 terms plus line and
-  column.
+- Encoding (§9 items 6–7): detect by BOM and the first four bytes (Appendix F; StrikeCore's
+  `DetectEncoding` ported and extended), then let the `encoding=` declaration pick the decoder.
+  UTF-16, UTF-32 and the table-driven single-byte encodings are transcoded to UTF-8 at the cursor
+  (one up-front conversion for memory input, a transcoding window for streams); legacy multi-byte
+  encodings go through the user's converter hook; EBCDIC, UTF-7 and unknown names are a clear
+  error. A UTF-8 BOM wins over a conflicting 8-bit declaration (a warning); a UTF-16/32 BOM with an
+  8-bit declaration is an error. Positions are reported in UTF-8 terms plus line and column
+  (columns count code points).
 - Validate UTF-8 once, before the tokenizer sees the bytes (KdlBeef's `FindInvalid`, 8 ASCII bytes
   at a time). The `Char` production then reduces to a control-byte test in the scanners' slow path
   plus U+FFFE/U+FFFF.
@@ -328,8 +331,9 @@ KdlBeef's comptime generator (`KdlSerializerCodeGen.bf`, `KdlBind.bf`, 2,260 lin
 | Namespaces | Per type (`[XmlObject(Namespace = "...")]`) and per member | |
 
 Names match by interned id; unknown attributes and elements are ignored, with an opt-in strict mode;
-numbers are overflow-checked, text is never auto-typed; naming policy (as declared by default, as in
-TomlBeef, with kebab/camel/lower options since SVG attributes are `stroke-width`); writing updates a
+numbers are overflow-checked, text is never auto-typed; names as declared by default (every surveyed
+library and TomlBeef; §9 item 10), with type-level `CamelCase`/`KebabCase`/`Lower` policies and
+`[XmlName]` per member, since one SVG element mixes `stroke-width` and `viewBox`; writing updates a
 PreserveStyle document in place.
 
 ### 4.13 Resource limits (`XmlReadConfig`)
@@ -399,7 +403,8 @@ skips checks and leaves DTD entities unexpanded).
 
 **Phase 4 — Errors, positions, limits, streams, encodings.** Golden messages, Positions sidecar,
 every limit with tests, `Read(Stream)` (all input paths produce identical documents and errors),
-the single-byte encodings.
+UTF-32, the single-byte encoding tables (generated from the WHATWG index files by a script kept in
+the repository), the converter hook and the opt-in fallback.
 
 **Phase 5 — PreserveStyle and mutation.** Sidecar slots of §4.9, preserving writer, mutation API;
 byte-exact round trips of every accepted suite input and every corpus SVG; edits keep neighbors.
@@ -407,13 +412,15 @@ byte-exact round trips of every accepted suite input and every corpus SVG; edits
 **Phase 6 — `[XmlObject]`.** The generator with §4.12's roles; a typed benchmark against quick-xml +
 serde, Go `encoding/xml` Unmarshal and .NET `XmlSerializer`.
 
-**Phase 7 — Extras, as needed.** `ReadSubtree`, namespace-off mode (if not done in phase 1),
-collect-errors, the streaming writer, the external-entity resolver.
+**Phase 7 — Collect-errors, then extras.** Collect-errors with recovery (required before the
+library is integrated; earlier if convenient). Then, as needed: `ReadSubtree`, namespace-off mode
+(if not done in phase 1), the streaming writer, the external-entity resolver.
 
 ## 7. Testing
 
 - The W3C suite at the strengths of §2.3, with `tests/xmlconf/skip.txt` and
-  `tests/xmlconf/expected-failures.txt` (a listed failure that starts passing fails the run).
+  `tests/xmlconf/expected-failures.txt` (a listed failure that starts passing fails the run); the
+  one deliberate deviation, `hst-lhs-007` (§9 item 6), is listed there with its reason.
 - The SVG corpora: every file parses; with PreserveStyle every file round-trips byte for byte.
 - `[Test]` units per area from `spec-reference.md` §16 (each line is a test), Debug and Release;
   LeakSanitizer; Windows via `~/development/beef-proton`.
@@ -440,20 +447,51 @@ Decided in this plan (from the research; override any):
    own rule for unknown 1.x versions).
 2. **DTD**: the internal subset is parsed and applied (entities, ATTLIST defaults and types,
    notations); nothing external is ever read; no validation.
-3. **Encodings**: UTF-8, UTF-16, ISO-8859-1, US-ASCII, Windows-1252; others are an error.
-4. **Checks**: full well-formedness by default; no lenient mode until a measurement asks for one.
-5. **PreserveStyle**: byte-exact (KdlBeef's bar), since the reader hands out source slices.
-6. **Typed mapping**: scalars are attributes by default.
+3. **Checks**: full well-formedness by default; no lenient mode until a measurement asks for one.
+4. **PreserveStyle**: byte-exact (KdlBeef's bar), since the reader hands out source slices.
+5. **Typed mapping**: scalars are attributes by default.
 
-Open:
+Decided by the author (2026-09-30):
 
-1. **Encoding conflicts**: a BOM that contradicts `encoding=` is fatal by the spec (`hst-lhs-007/008`)
-   but accepted by libxml2 (and expat for 007). Strict (proposed) or lenient?
-2. **More encodings**: resvg's corpus has a Windows-1251 SVG. Add a few more tables (Windows-125x,
-   ISO-8859-x) or a user converter hook?
-3. **Error columns**: in code points (proposed, as the siblings) or bytes?
-4. **Entity amplification defaults** (§4.6): libxml2 (5×) is strict, expat (100× after 8 MiB) loose;
-   proposed 10× after 1 MB, to confirm on the corpora.
-5. **Typed-mapping naming default**: as declared (TomlBeef) or kebab-case (KdlBeef; SVG's
-   `stroke-width`)?
-6. **Collect-errors**: needed for the author's tools (editor diagnostics), or later?
+6. **BOM vs `encoding=` conflicts: do what most parsers do** (measured, below): a **UTF-8 BOM wins**
+   over a declaration naming another ASCII-compatible encoding (read as UTF-8, a warning in the
+   Positions/PreserveStyle sidecar); a **UTF-16 BOM with a declaration of an 8-bit encoding is an
+   error**. This deviates from the spec on one suite case, `hst-lhs-007`, which goes in the
+   expected-deviations list with this reason. Measured with every benchmark harness on the suite's
+   three cases (`eduni/misc/007–009.xml`; the libraries that cannot read UTF-16 are n/a for 008/009):
+
+   | Case | Accept | Reject |
+   |---|---|---|
+   | 007: UTF-8 BOM + `encoding='iso-8859-1'` | 27: libxml2 (tree and reader), lxml, pugixml, Xerces-C, expat, ElementTree, roxmltree, quick-xml, xmlparser, the JDK's SAX/StAX/DOM, Woodstox, Aalto, the three .NET models, TurboXml, etree, xmlquery, fast-xml-parser, xml2js, sax-js, BeefXml, Xml-Beef | 7: xml-rs, xmltree, zig-xml, nektro/zig-xml, encoding/xml, XmlParser (C#), Beef-Lang-XML |
+   | 008: UTF-16 BOM + `encoding='utf-8'` (UTF-16 bytes) | 7: libxml2 (both), lxml, pugixml (both), TurboXml, Xml-Beef | 17: expat, Xerces-C, ElementTree, the JDK's SAX/StAX/DOM, Woodstox, Aalto, the three .NET models, xml-rs, xmltree, xmlquery, zig-xml, BeefXml, Beef-Lang-XML |
+   | 009: UTF-16 BOM, then UTF-8 bytes | 2: TurboXml, Xml-Beef (no checks) | everything else |
+7. **Encodings: detection plus table-driven decoders.** Port the author's detector from StrikeCore
+   (`~/development/strikeline/Packages/com.coda-digital.strikecore/Runtime/ChartParser/IO/FeedbackChart/ParsingTools.cs`,
+   `DetectEncoding`: BOMs for UTF-8/16/32 and UTF-7's rejection, then strict UTF-8, then a
+   single-byte fallback) and expand it with XML's rules:
+   - Appendix F first: BOMs (UTF-8, UTF-16 LE/BE, UTF-32 LE/BE), then the `<?xm` byte patterns
+     without a BOM; then the `encoding=` declaration selects the decoder (resvg's
+     `not-UTF-8-encoding.svg` declares `Windows-1251`, so declared encodings are the real need).
+   - Decoders: UTF-8 (fast path, no transcoding), UTF-16 and UTF-32 transcoded to UTF-8 at the
+     cursor, and **table-driven single-byte encodings** generated from the WHATWG index files:
+     Windows-874 and 1250–1258, ISO-8859-1…16, KOI8-R/U, IBM866, Macintosh (128 entries each, ~15 KB
+     in all), plus US-ASCII. Legacy multi-byte encodings (Shift_JIS, EUC-JP, GBK/GB18030, Big5,
+     EUC-KR) need large tables: a user converter hook (`XmlReadConfig.EncodingResolver`) rather than
+     built-ins.
+   - StrikeCore's heuristic (no BOM, no declaration, invalid UTF-8 → Latin-1) is not what the spec
+     allows (undeclared non-UTF-8 is a fatal error), but is how hand-edited files in the wild get
+     read: an opt-in `EncodingFallback` (Windows-1252, a superset of Latin-1's printable range), off
+     by default and never used for the conformance run.
+   - Unknown or unsupported declared encodings, UTF-7, EBCDIC: a clean located error.
+8. **Error columns count characters** (code points), as in the siblings.
+9. **Entity amplification**: 10× after 1 MB (between libxml2's 5× and expat's 100× after 8 MiB),
+   with depth 20 and 10 MB total; to confirm against the corpora in phase 4.
+10. **Typed-mapping names: as declared**, which is what every surveyed library does (.NET
+    `XmlSerializer` and Go `encoding/xml` use the member name verbatim, serde the field name with an
+    optional `rename_all`, JAXB the property name) and what TomlBeef does. Kebab-case (KdlBeef's
+    default) would be wrong for XML formats as a default: SVG alone mixes `stroke-width` with
+    `viewBox`, `gradientUnits` and `linearGradient`; Maven and Android use camelCase, `.csproj`
+    PascalCase, Atom lowercase. Type-level policies (`CamelCase`, `KebabCase`, `Lower`) and
+    per-member `[XmlName]` cover the rest.
+11. **Collect-errors: required**, before the library is integrated anywhere; its phase does not
+    matter (phase 7 at the latest, §6).

@@ -26,4 +26,4 @@ Any change to `.bf` files must keep these green in both Debug and Release.
 | ID | Item | Size |
 |----|------|------|
 | P1 | Phase 1: reader core and conformance runner (`plan.md` §6) | L |
-| Q | Open questions for the author (`plan.md` §9) | — |
+| Q | Decisions recorded in `plan.md` §9 (2026-09-30) | — |
