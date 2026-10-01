@@ -4,14 +4,60 @@ using internal XmlBeef;
 
 namespace XmlBeef;
 
-/// @brief How XmlDocument.Write formats the document.
+/// @brief How XmlDocument.Write formats the document, and how WriteBytes and WriteFile treat
+/// characters the document's encoding cannot hold.
 public struct XmlWriteOptions
 {
 	/// @brief The indentation unit (`"  "`, `"\t"`); empty for none. Indentation is added only inside
 	/// elements whose content is elements alone (whitespace-only text there is replaced by it); an
-	/// element with text or CDATA content, and everything inside it, is written as it is.
+	/// element with text or CDATA content, and everything inside it, is written as it is. Canonical
+	/// form only: a PreserveStyle document keeps its own layout.
 	public StringView Indent = default;
+	/// @brief WriteBytes and WriteFile: what to do with a character the document's encoding cannot hold
+	/// (a value set in code, say `✓` in a Windows-1251 document).
+	public XmlUnencodable Unencodable = .Error;
+	/// @brief Unencodable.Replace: the text written instead of such a character (it must itself be
+	/// encodable and valid where it goes).
+	public StringView Replacement = "?";
+	/// @brief Unencodable.Custom: decides for each such character.
+	public XmlUnencodableHandler Handler = null;
 }
+
+/// @brief What WriteBytes and WriteFile do with a character the document's encoding cannot hold.
+public enum XmlUnencodable
+{
+	/// @brief Fail with an error naming the character (the default).
+	Error,
+	/// @brief Write a character reference (`&#x2713;`) in text and attribute values, and in a CDATA
+	/// section around one (`]]>&#x2713;<![CDATA[`): nothing is lost. In comments, processing
+	/// instructions and names XML has no escape: still an error there.
+	CharacterReference,
+	/// @brief Write XmlWriteOptions.Replacement instead, anywhere but in names (still an error there).
+	Replace,
+	/// @brief Write the whole document in UTF-8 instead, when it has such a character; a PreserveStyle
+	/// document's XML declaration then says `encoding="UTF-8"`, and nothing else changes.
+	Utf8,
+	/// @brief Ask XmlWriteOptions.Handler.
+	Custom
+}
+
+/// @brief Where a character is in the written document.
+public enum XmlTextContext
+{
+	Text,
+	AttributeValue,
+	CData,
+	Comment,
+	ProcessingInstruction
+}
+
+/// @brief Decides what to write for a character the document's encoding cannot hold.
+/// @param c The character.
+/// @param context Where it is.
+/// @param replacement Receives the text to write instead, as written (it must be encodable and valid
+/// where it goes: a character reference is valid only in text and attribute values).
+/// @return False to fail with an error instead.
+public delegate bool XmlUnencodableHandler(char32 c, XmlTextContext context, String replacement);
 
 /// The canonical writer (plan.md §4.11).
 extension XmlDocument
@@ -186,7 +232,9 @@ extension XmlDocument
 			output.Append(' ');
 			output.Append(mNames[attribute.mName]);
 			output.Append("=\"");
+			int valueStart = output.Length;
 			AppendAttributeEscaped(output, attribute.mValue);
+			FixUnencodable(output, valueStart, .AttributeValue);
 			output.Append('"');
 		}
 	}
@@ -194,10 +242,12 @@ extension XmlDocument
 	/// A node without children: text, CDATA, a comment, a processing instruction, an entity reference.
 	void WriteLeaf(XmlNodeRecord node, String output)
 	{
+		int start = output.Length;
 		switch (node.mKind)
 		{
 		case .Text:
 			AppendTextEscaped(output, node.mValue);
+			FixUnencodable(output, start, .Text);
 		case .CData:
 			output.Append("<![CDATA[");
 			// `]]>` cannot be inside a CDATA section: end it there and start another
@@ -213,9 +263,11 @@ extension XmlDocument
 			}
 			output.Append(node.mValue.Substring(run));
 			output.Append("]]>");
+			FixUnencodable(output, start, .CData);
 		case .Comment:
 			output.Append("<!--");
 			output.Append(node.mValue);
+			FixUnencodable(output, start, .Comment);
 			output.Append("-->");
 		case .ProcessingInstruction:
 			output.Append("<?");
@@ -223,7 +275,9 @@ extension XmlDocument
 			if (!node.mValue.IsEmpty)
 			{
 				output.Append(' ');
+				int dataStart = output.Length;
 				output.Append(node.mValue);
+				FixUnencodable(output, dataStart, .ProcessingInstruction);
 			}
 			output.Append("?>");
 		case .EntityReference:
@@ -270,6 +324,62 @@ extension XmlDocument
 		output.Append(quote);
 		output.Append(literal);
 		output.Append(quote);
+	}
+
+	/// During WriteBytes with a policy for unencodable characters: applies it to the piece written from
+	/// `start` on (a generated text, attribute value, CDATA section, comment or PI's data). What it
+	/// leaves is the encoder's error.
+	internal void FixUnencodable(String output, int start, XmlTextContext context)
+	{
+		if (!mFixing)
+			return;
+		int i = start;
+		let replacement = scope String();
+		while (i < output.Length)
+		{
+			if ((uint8)output[i] < 0x80)
+			{
+				i++;
+				continue;
+			}
+			char32 c = XmlChar.Decode(output.Ptr, i, let length);
+			if (XmlEncoder.CanEncode(c, mFixEncoding))
+			{
+				i += length;
+				continue;
+			}
+			replacement.Clear();
+			bool replace = false;
+			switch (mFixOptions.Unencodable)
+			{
+			case .CharacterReference:
+				if (context == .Text || context == .AttributeValue || context == .CData)
+				{
+					if (context == .CData)
+						replacement.Append("]]>");
+					replacement.Append("&#x");
+					XmlChar.AppendHex(replacement, (uint32)c, 1);
+					replacement.Append(';');
+					if (context == .CData)
+						replacement.Append("<![CDATA[");
+					replace = true;
+				}
+			case .Replace:
+				replacement.Append(mFixOptions.Replacement);
+				replace = true;
+			case .Custom:
+				replace = mFixOptions.Handler != null && mFixOptions.Handler(c, context, replacement);
+			default:
+			}
+			if (!replace)
+			{
+				i += length;
+				continue;
+			}
+			output.Remove(i, length);
+			output.Insert(i, replacement);
+			i += replacement.Length;
+		}
 	}
 
 	/// Text: `&` and `<` escaped, `>` after `]]`, and CR as `&#13;` (a literal one would be read as a

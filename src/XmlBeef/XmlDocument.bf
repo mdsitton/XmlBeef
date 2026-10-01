@@ -156,6 +156,11 @@ public class XmlDocument
 	internal int32 mTailStart;
 	internal List<XmlNodeStyle> mNodeStyles ~ delete _;
 	internal List<XmlAttributeStyle> mAttributeStyles ~ delete _;
+	/// While WriteBytes writes: the encoding generated pieces are checked for, and the options saying what
+	/// to do with a character it cannot hold (mFixing: a policy other than failing is active).
+	internal bool mFixing;
+	internal XmlEncoding mFixEncoding;
+	internal XmlWriteOptions mFixOptions;
 	/// Capture state during a PreserveStyle read: the end of the last construct at the current level,
 	/// and the enclosing levels'.
 	bool mStyleBegun;

@@ -308,25 +308,76 @@ extension XmlDocument
 	/// @param output The list to append to.
 	/// @return .Ok, or an InvalidEncoding error naming a character that the encoding cannot hold (a
 	/// value set in code), UnsupportedEncoding for a document read through
-	/// XmlReadConfig.EncodingConverter. The output then has the bytes before it.
+	/// XmlReadConfig.EncodingConverter. The output is then as it was.
 	public Result<void, XmlParseError> WriteBytes(List<uint8> output)
 	{
-		let text = scope String();
-		Write(text);
+		return WriteBytes(output, .());
+	}
+
+	/// @brief Write the document as bytes (see WriteBytes(List<uint8>)), with options: indentation for a
+	/// canonical document, and what to do with characters the encoding cannot hold
+	/// (XmlWriteOptions.Unencodable).
+	/// @param output The list to append to.
+	/// @param options The options.
+	/// @return .Ok, or an error as WriteBytes(List<uint8>). The output is then as it was.
+	public Result<void, XmlParseError> WriteBytes(List<uint8> output, XmlWriteOptions options)
+	{
 		XmlEncoding encoding = mPreserve ? mEncoding : .Utf8;
-		if (encoding == .Custom)
-			return .Err(XmlParseError(.UnsupportedEncoding, "A document read through EncodingConverter cannot be written in its encoding; use Write for UTF-8 text", 0, 0, 0, 0));
-		int bad = XmlEncoder.Encode(text, encoding, output);
-		if (bad >= 0)
+		bool utf8Fallback = options.Unencodable == .Utf8;
+		if (encoding == .Custom && !utf8Fallback)
+			return .Err(XmlParseError(.UnsupportedEncoding, "A document read through EncodingConverter cannot be written in its encoding; use Write for UTF-8 text, or XmlUnencodable.Utf8", 0, 0, 0, 0));
+		let text = scope String();
+		// The policy applies to what the writer generates: what it keeps from the source was in the encoding
+		mFixing = !utf8Fallback && options.Unencodable != .Error && encoding != .Utf8;
+		mFixEncoding = encoding;
+		mFixOptions = options;
+		defer { mFixing = false; mFixOptions = default; }
+		if (mPreserve)
+			WritePreserving(text);
+		else
+			WriteCanonical(text, options);
+
+		int before = output.Count;
+		int bad = (encoding == .Custom) ? 0 : XmlEncoder.Encode(text, encoding, output);
+		if (bad < 0)
+			return .Ok;
+		output.Count = before;
+		if (utf8Fallback)
 		{
-			char32 cp = XmlChar.Decode(text.Ptr, bad, let length);
-			let message = scope String();
-			message.Append("The character ");
-			XmlChar.AppendCodePointName(message, (uint32)cp);
-			message.AppendF(" cannot be written in the document's encoding ({})", encoding);
-			return .Err(XmlParseError.At(.InvalidEncoding, message, text, bad, length));
+			// The whole document in UTF-8, saying so in its declaration
+			SetDeclaredEncoding(text, "UTF-8");
+			XmlEncoder.Encode(text, .Utf8, output);
+			return .Ok;
 		}
-		return .Ok;
+		char32 cp = XmlChar.Decode(text.Ptr, bad, let length);
+		let message = scope String();
+		message.Append("The character ");
+		XmlChar.AppendCodePointName(message, (uint32)cp);
+		message.AppendF(" cannot be written in the document's encoding ({})", encoding);
+		if (options.Unencodable == .CharacterReference)
+			message.Append(" (where XML has no character reference: a comment, a processing instruction, a name)");
+		return .Err(XmlParseError.At(.InvalidEncoding, message, text, bad, length));
+	}
+
+	/// The `encoding` of the XML declaration at the start of `text` (after a byte order mark) made
+	/// `name`, if it has one.
+	static void SetDeclaredEncoding(String text, StringView name)
+	{
+		int start = text.StartsWith("\u{FEFF}") ? 3 : 0;
+		if (!text.Substring(start).StartsWith("<?xml"))
+			return;
+		int end = text.IndexOf("?>", start);
+		int at = text.IndexOf("encoding", start);
+		if (end < 0 || at < 0 || at > end)
+			return;
+		int quote = at + 8;
+		while (quote < end && text[quote] != '"' && text[quote] != '\'')
+			quote++;
+		int close = (quote + 1 < end) ? text.IndexOf(text[quote], quote + 1) : -1;
+		if (close < 0 || close > end)
+			return;
+		text.Remove(quote + 1, close - quote - 1);
+		text.Insert(quote + 1, name);
 	}
 
 	/// @brief Write the document (as WriteBytes does) to a file, replacing it.
@@ -334,8 +385,17 @@ extension XmlDocument
 	/// @return .Ok, or WriteBytes' errors, or IoError if the file cannot be written.
 	public Result<void, XmlParseError> WriteFile(StringView path)
 	{
+		return WriteFile(path, .());
+	}
+
+	/// @brief Write the document (as WriteBytes does, with options) to a file, replacing it.
+	/// @param path The file's path.
+	/// @param options The options (see WriteBytes(List<uint8>, XmlWriteOptions)).
+	/// @return .Ok, or WriteBytes' errors, or IoError if the file cannot be written.
+	public Result<void, XmlParseError> WriteFile(StringView path, XmlWriteOptions options)
+	{
 		let bytes = scope List<uint8>();
-		Try!(WriteBytes(bytes));
+		Try!(WriteBytes(bytes, options));
 		let file = scope FileStream();
 		if (file.Create(path, .Write) case .Err)
 			return .Err(XmlParseError(.IoError, "Cannot create the file", 0, 0, 0, 0));

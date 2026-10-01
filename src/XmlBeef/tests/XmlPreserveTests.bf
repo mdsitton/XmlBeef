@@ -188,6 +188,81 @@ static class XmlPreserveTests
 		Test.Assert(StringView((char8*)bytes.Ptr, bytes.Count) == "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<a>При</a>\n");
 	}
 
+	static StringView Bytes(List<uint8> bytes) => .((char8*)bytes.Ptr, bytes.Count);
+
+	[Test]
+	public static void Bytes_UnencodablePolicies()
+	{
+		let input = "<?xml version='1.0' encoding='windows-1251'?><a t='x'>\xCF<![CDATA[c]]><!--k--></a>";
+		let doc = scope XmlDocument();
+		Test.Assert(doc.Read(input, Preserve()) case .Ok);
+		let a = doc.Root;
+		a.FirstChild.SetValue("П✓");
+		a.SetAttribute("t", "y✓");
+		a.FirstChild.NextSibling.SetValue("c✓");
+		let bytes = scope List<uint8>();
+
+		// Error, the default: nothing written
+		Test.Assert(doc.WriteBytes(bytes) case .Err && bytes.IsEmpty);
+
+		// Character references (and CDATA split around one)
+		var options = XmlWriteOptions();
+		options.Unencodable = .CharacterReference;
+		Test.Assert(doc.WriteBytes(bytes, options) case .Ok);
+		Test.Assert(Bytes(bytes) == "<?xml version='1.0' encoding='windows-1251'?><a t='y&#x2713;'>\xCF&#x2713;<![CDATA[c]]>&#x2713;<![CDATA[]]><!--k--></a>");
+		// ... which reads back the same
+		let again = scope XmlDocument();
+		Test.Assert(again.ReadBytes(bytes) case .Ok);
+		Test.Assert(again.Root.FirstChild.Value == "П✓" && again.Root.GetAttribute("t") == "y✓");
+		var text = scope String();
+		again.Root.AppendText(text);
+		Test.Assert(text == "П✓c✓");
+
+		// No reference in a comment: still an error there
+		a.LastChild.SetValue("k✓");
+		bytes.Clear();
+		switch (doc.WriteBytes(bytes, options))
+		{
+		case .Ok: Test.FatalError("a reference in a comment");
+		case .Err(let error): Test.Assert(error.mMessage.Contains("U+2713") && error.mMessage.Contains("no character reference"));
+		}
+
+		// Replace
+		options.Unencodable = .Replace;
+		options.Replacement = "?";
+		bytes.Clear();
+		Test.Assert(doc.WriteBytes(bytes, options) case .Ok);
+		Test.Assert(Bytes(bytes) == "<?xml version='1.0' encoding='windows-1251'?><a t='y?'>\xCF?<![CDATA[c?]]><!--k?--></a>");
+
+		// Custom: by context
+		options.Unencodable = .Custom;
+		options.Handler = scope (c, context, replacement) =>
+			{
+				if (context == .Comment)
+					return false;
+				replacement.Append(context == .Text ? "[check]" : "_");
+				return true;
+			};
+		bytes.Clear();
+		Test.Assert(doc.WriteBytes(bytes, options) case .Err);
+		a.LastChild.SetValue("k");
+		Test.Assert(doc.WriteBytes(bytes, options) case .Ok);
+		Test.Assert(Bytes(bytes) == "<?xml version='1.0' encoding='windows-1251'?><a t='y_'>\xCF[check]<![CDATA[c_]]><!--k--></a>");
+
+		// UTF-8 for the whole document, saying so
+		options.Unencodable = .Utf8;
+		bytes.Clear();
+		Test.Assert(doc.WriteBytes(bytes, options) case .Ok);
+		Test.Assert(Bytes(bytes) == "<?xml version='1.0' encoding='UTF-8'?><a t='y✓'>П✓<![CDATA[c✓]]><!--k--></a>");
+		// When everything can be held, the document's own encoding still
+		a.FirstChild.SetValue("П");
+		a.SetAttribute("t", "y");
+		a.FirstChild.NextSibling.SetValue("c");
+		bytes.Clear();
+		Test.Assert(doc.WriteBytes(bytes, options) case .Ok);
+		Test.Assert(Bytes(bytes) == "<?xml version='1.0' encoding='windows-1251'?><a t='y'>\xCF<![CDATA[c]]><!--k--></a>");
+	}
+
 	[Test]
 	public static void Streams_SameAsMemory()
 	{

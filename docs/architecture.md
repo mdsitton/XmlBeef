@@ -339,8 +339,13 @@ for reading back into the edited document.
   and everything new, are written canonically; a new node outside the root starts a line.
 - **Bytes.** `WriteBytes`/`WriteFile` encode the text in the document's encoding (`XmlEncoder`: UTF-16
   and UTF-32 with surrogate pairs, Latin-1, ASCII, the single-byte tables reversed), the byte order
-  mark coming from U+FEFF; a character the encoding lacks is an error naming it. Canonical documents
-  are written in UTF-8.
+  mark coming from U+FEFF. Canonical documents are written in UTF-8. A character the encoding lacks
+  (a value set in code) follows `XmlWriteOptions.Unencodable`: an error naming it (the default), a
+  character reference where XML has one (text, attribute values, and CDATA split around it), a
+  replacement string, the whole document in UTF-8 with its declaration saying so, or a handler that
+  decides by context. The policy is applied to each piece the writer generates as it is written
+  (`FixUnencodable`); what the source kept is in the encoding already, and what a policy cannot fix
+  (names, a reference in a comment) is the encoder's error.
 
 ## 5. Writing
 

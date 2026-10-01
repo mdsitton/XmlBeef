@@ -93,6 +93,31 @@ internal static class XmlEncoder
 		return -1;
 	}
 
+	/// Whether `encoding` can hold the character `c`.
+	public static bool CanEncode(char32 c, XmlEncoding encoding)
+	{
+		uint32 cp = (uint32)c;
+		if (cp < 0x80)
+			return encoding != .Custom;
+		switch (encoding)
+		{
+		case .Utf8, .Utf16LE, .Utf16BE, .Utf32LE, .Utf32BE:
+			return true;
+		case .Ascii, .Custom:
+			return false;
+		default:
+			uint16* table = XmlEncodingTables.Get(encoding);
+			if (table == null)
+				return cp <= 0xFF;
+			for (int k < 128)
+			{
+				if (table[k] == cp)
+					return true;
+			}
+			return false;
+		}
+	}
+
 	static void Put16(List<uint8> output, uint32 unit, bool bigEndian)
 	{
 		if (bigEndian)

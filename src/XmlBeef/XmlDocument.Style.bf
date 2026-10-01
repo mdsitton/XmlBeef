@@ -469,7 +469,9 @@ extension XmlDocument
 				output.Append(newLead);
 				output.Append(mNames[attribute.mName]);
 				output.Append("=\"");
+				int valueStart = output.Length;
 				AppendAttributeEscaped(output, attribute.mValue);
+				FixUnencodable(output, valueStart, .AttributeValue);
 				output.Append('"');
 				continue;
 			}
@@ -478,7 +480,9 @@ extension XmlDocument
 			{
 				char8 quote = mSource[style.mValueStart - 1];
 				output.Append(Source(style.mStart, style.mValueStart));
+				int valueStart = output.Length;
 				AppendAttributeEscaped(output, attribute.mValue, quote);
+				FixUnencodable(output, valueStart, .AttributeValue);
 				output.Append(quote);
 			}
 			else
