@@ -51,6 +51,39 @@ class TestPathData
 	public List<TestPoint> Points ~ delete _;
 }
 
+// Dictionaries in every XmlMapStyle
+
+[XmlObject(Name = "pet")]
+abstract class TestPet
+{
+}
+
+// Strict: the entry's key attribute (`name`) is allowed on it
+[XmlObject(Name = "cat", Strict = true)]
+class TestCat : TestPet
+{
+	public int32 lives;
+}
+
+[XmlObject(Name = "dog")]
+class TestDog : TestPet
+{
+	public String breed ~ delete _;
+}
+
+[XmlObject(Name = "settings")]
+class TestSettings
+{
+	public String known ~ delete _;
+	public Dictionary<String, int32> limits ~ DeleteDictionaryAndKeys!(_);
+	[XmlMap(Style = .Entries, Entry = "add", Value = "value")] public Dictionary<String, String> appSettings ~ DeleteDictionaryAndKeysAndValues!(_);
+	[XmlMap(Style = .KeyValueElements)] public Dictionary<int32, String> byNumber ~ DeleteDictionaryAndValues!(_);
+	[XmlMap(Style = .KeysAsNames)] public Dictionary<TestLevel, bool> flags ~ delete _;
+	[XmlMap(Style = .Attributes)] public Dictionary<String, double> sizes ~ DeleteDictionaryAndKeys!(_);
+	public Dictionary<String, TestPet> pets ~ DeleteDictionaryAndKeysAndValues!(_);
+	[XmlMap(Style = .Attributes, Wrapped = false)] public Dictionary<String, String> other ~ DeleteDictionaryAndKeysAndValues!(_);
+}
+
 /// For reads into an allocator: no destructors, the allocator owns what the read creates.
 [XmlObject(Name = "arena")]
 class TestArena
@@ -254,6 +287,84 @@ static class XmlObjectTests
 		let output = doc.Write(.. scope String());
 		if (output != expected)
 			Test.FatalError(scope $"line {line}: wrote `{output}`");
+	}
+
+	const String cSettings = """
+		<settings known="k" extra="x" more="y">
+		  <limits><int32 name="retries">3</int32><int32 name="timeout">30</int32></limits>
+		  <appSettings><add key="mode" value="fast"/><add key="path" value="/bin"/></appSettings>
+		  <byNumber><entry><key>1</key><value>one</value></entry><entry><key>2</key><value>two</value></entry></byNumber>
+		  <flags><Debug>true</Debug><Info>0</Info></flags>
+		  <sizes w="1.5" h="2"/>
+		  <pets><cat name="tom" lives="9"/><dog name="rex" breed="lab"/></pets>
+		</settings>
+		""";
+
+	[Test]
+	public static void Maps_EveryStyle()
+	{
+		let settings = scope TestSettings();
+		Test.Assert(XmlSerializer.Read(cSettings, settings) case .Ok);
+		Test.Assert(settings.known == "k" && settings.limits.Count == 2 && settings.limits["timeout"] == 30);
+		Test.Assert(settings.appSettings["path"] == "/bin" && settings.byNumber[2] == "two");
+		Test.Assert(settings.flags[.Debug] && !settings.flags[.Info] && settings.sizes["w"] == 1.5);
+		Test.Assert((settings.pets["tom"] as TestCat).lives == 9 && (settings.pets["rex"] as TestDog).breed == "lab");
+		// The unwrapped Attributes dictionary takes the attributes no other field maps
+		Test.Assert(settings.other.Count == 2 && settings.other["extra"] == "x" && !settings.other.ContainsKey("known"));
+
+		// Written and read back the same
+		let output = scope String();
+		Test.Assert(XmlSerializer.Write(settings, output) case .Ok);
+		let again = scope TestSettings();
+		Test.Assert(XmlSerializer.Read(output, again) case .Ok);
+		Test.Assert(again.limits["retries"] == 3 && again.appSettings["mode"] == "fast" && again.byNumber[1] == "one");
+		Test.Assert(again.flags.Count == 2 && again.sizes["h"] == 2 && again.other["more"] == "y");
+		Test.Assert((again.pets["rex"] as TestDog).breed == "lab");
+		Test.Assert(output.Contains("<int32 name=\"retries\">3</int32>") && output.Contains("<add key=\"mode\" value=\"fast\"/>"));
+		Test.Assert(output.Contains("<entry><key>1</key><value>one</value></entry>") && output.Contains("<Debug>true</Debug>"));
+		Test.Assert(output.Contains("<sizes w=\"1.5\" h=\"2\"/>") && output.Contains("<cat name=\"tom\" lives=\"9\"/>"));
+	}
+
+	[Test]
+	public static void Maps_Errors()
+	{
+		ExpectError(XmlSerializer.Read("<settings><limits><string name='a'>x</string></limits></settings>", scope TestSettings()), .InvalidValue, "string: expected a `int32` entry");
+		ExpectError(XmlSerializer.Read("<settings><limits><int32>1</int32></limits></settings>", scope TestSettings()), .MissingValue, "The attribute `name` is required");
+		ExpectError(XmlSerializer.Read("<settings><byNumber><entry><key>x</key><value>v</value></entry></byNumber></settings>", scope TestSettings()), .InvalidValue, "expected an integer");
+		ExpectError(XmlSerializer.Read("<settings><flags><Loud>true</Loud></flags></settings>", scope TestSettings()), .InvalidValue, "`Loud` is not one of Debug, Info, WarningOnly");
+		ExpectError(XmlSerializer.Read("<settings><pets><bird name='b'/></pets></settings>", scope TestSettings()), .InvalidValue, "unknown element: expected one of");
+		// A key that cannot be an XML name, written with KeysAsNames or Attributes
+		let settings = scope TestSettings();
+		settings.sizes = new .();
+		settings.sizes[new .("not a name")] = 1;
+		ExpectError(XmlSerializer.Write(settings, scope String()), .InvalidValue, "the key `not a name` cannot be written as an XML name");
+	}
+
+	[Test]
+	public static void Maps_WrittenInPlace()
+	{
+		let doc = scope XmlDocument();
+		var config = XmlReadConfig();
+		config.MetadataMode = .PreserveStyle;
+		Test.Assert(doc.Read("<settings>\n  <limits>\n    <int32 name=\"retries\">3</int32>\n    <int32 name=\"timeout\">30</int32>\n  </limits>\n</settings>\n", config) case .Ok);
+		let settings = scope TestSettings();
+		Test.Assert(settings.XmlRead(doc.Root) case .Ok);
+		// Unchanged: the document is as read
+		Test.Assert(settings.XmlWrite(doc.Root) case .Ok);
+		ExpectWritten(doc, "<settings>\n  <limits>\n    <int32 name=\"retries\">3</int32>\n    <int32 name=\"timeout\">30</int32>\n  </limits>\n</settings>\n");
+		// A value changed, a key removed, one added
+		settings.limits["timeout"] = 60;
+		for (let pair in settings.limits)
+		{
+			if (pair.key == "retries")
+			{
+				delete pair.key;
+				@pair.Remove();
+			}
+		}
+		settings.limits[new .("depth")] = 2;
+		Test.Assert(settings.XmlWrite(doc.Root) case .Ok);
+		ExpectWritten(doc, "<settings>\n  <limits>\n    <int32 name=\"timeout\">60</int32>\n    <int32 name=\"depth\">2</int32>\n  </limits>\n</settings>\n");
 	}
 
 	[Test]

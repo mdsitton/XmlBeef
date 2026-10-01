@@ -991,16 +991,19 @@ public static class XmlBind
 	/// @param element The element read.
 	/// @param attributes The attribute names the fields map.
 	/// @param elements The child element names the fields map.
-	/// @param allElements Whether an [XmlChildren] list takes every child element.
+	/// @param allElements Whether a field takes every child element ([XmlChildren], an unwrapped
+	/// KeysAsNames dictionary).
+	/// @param allAttributes Whether a field takes every attribute (an unwrapped Attributes dictionary).
 	/// @param text Whether a field maps the element's text.
 	/// @return .Ok, or the error.
-	public static Result<void, XmlParseError> CheckStrict(XmlNode element, Span<StringView> attributes, Span<StringView> elements, bool allElements, bool text)
+	public static Result<void, XmlParseError> CheckStrict(XmlNode element, Span<StringView> attributes, Span<StringView> elements, bool allElements, bool allAttributes, bool text)
 	{
 		int position = 0;
 		for (let attribute in element.Attributes)
 		{
 			StringView name = attribute.Name;
-			bool known = !attribute.IsSpecified || name == "xmlns" || name.StartsWith("xmlns:") || name.StartsWith("xml:") || IsClaimed(attribute.LocalName, attributes);
+			bool known = allAttributes || !attribute.IsSpecified || name == "xmlns" || name.StartsWith("xmlns:") || name.StartsWith("xml:") ||
+				IsClaimed(attribute.LocalName, attributes) || IsEntryKey(element, name);
 			if (!known)
 				return .Err(MakeError(element, position, name, "no field maps this attribute", .UnexpectedContent));
 			position++;

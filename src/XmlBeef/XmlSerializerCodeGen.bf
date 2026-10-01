@@ -24,6 +24,8 @@ public static class XmlSerializerCodeGen
 		Enum,
 		Object,
 		List,
+		/// Dictionary<K, V>
+		Dictionary,
 		/// An IXmlConverter<T>: from [XmlUseConverter] on the field, or registered with [XmlConverter]
 		Converter
 	}
@@ -47,7 +49,9 @@ public static class XmlSerializerCodeGen
 		ChildObjects,
 		/// A List<T>: every unclaimed child element, read as the [XmlObject] type named after it
 		/// ([XmlChildren]).
-		Children
+		Children,
+		/// A Dictionary, in the shape its [XmlMap] gives (XmlMapStyle).
+		Map
 	}
 
 	/// @brief Emit IXmlSerializable into `type`.
@@ -86,7 +90,7 @@ public static class XmlSerializerCodeGen
 		// 1. The chain's claimed names, checked for conflicts
 		let claimedElements = scope String();
 		let claimedAttributes = scope String();
-		ScanChain(type, naming, namespaceUri, ownerName, claimedElements, let elementCount, claimedAttributes, let attributeCount, let allElements, let mapsText);
+		ScanChain(type, naming, namespaceUri, ownerName, claimedElements, let elementCount, claimedAttributes, let attributeCount, let allElements, let allAttributes, let mapsText);
 		// What the [XmlChildren] list and the strict check see: for a class through virtual properties,
 		// so that a base's code also leaves alone what a subclass's fields claim
 		if (elementCount > 0)
@@ -96,12 +100,14 @@ public static class XmlSerializerCodeGen
 		StringView elementsExpr;
 		StringView attributesExpr;
 		StringView allExpr;
+		StringView allAttributesExpr;
 		StringView textExpr;
 		if (type.IsValueType)
 		{
 			elementsExpr = (elementCount > 0) ? "sXmlClaimedElements" : "default";
 			attributesExpr = (attributeCount > 0) ? "sXmlClaimedAttributes" : "default";
 			allExpr = allElements ? "true" : "false";
+			allAttributesExpr = allAttributes ? "true" : "false";
 			textExpr = mapsText ? "true" : "false";
 		}
 		else
@@ -109,8 +115,10 @@ public static class XmlSerializerCodeGen
 			elementsExpr = "this.XmlClaimedElementNames";
 			attributesExpr = "this.XmlClaimedAttributeNames";
 			allExpr = "this.XmlTakesAllElements";
+			allAttributesExpr = "this.XmlTakesAllAttributes";
 			textExpr = "this.XmlMapsText";
 			StringView overriding = baseIsObject ? "override" : "virtual";
+			read.Insert(0, scope $"protected {overriding} bool XmlTakesAllAttributes => {allAttributes ? "true" : "false"};\n");
 			read.Insert(0, scope $"protected {overriding} Span<StringView> XmlClaimedElementNames => {(elementCount > 0) ? "sXmlClaimedElements" : "default"};\n");
 			read.Insert(0, scope $"protected {overriding} Span<StringView> XmlClaimedAttributeNames => {(attributeCount > 0) ? "sXmlClaimedAttributes" : "default"};\n");
 			read.Insert(0, scope $"protected {overriding} bool XmlTakesAllElements => {allElements ? "true" : "false"};\n");
@@ -147,11 +155,16 @@ public static class XmlSerializerCodeGen
 			case .Children:
 				EmitReadChildren(read, ownerName, fieldName, plan.mType, plan.mElement, elementsExpr);
 				EmitWriteChildren(write, fieldName, plan.mElement, elementsExpr);
+			case .Map:
+				// An unwrapped catch-all leaves alone what the other fields map
+				StringView claimed = plan.mWrapped ? "default" : (plan.mMapStyle == .Attributes) ? attributesExpr : (plan.mMapStyle == .KeysAsNames) ? elementsExpr : "default";
+				EmitReadMap(read, ownerName, fieldName, plan, claimed);
+				EmitWriteMap(write, fieldName, plan, claimed);
 			}
 		}
 
 		if (strict)
-			read.AppendF("\tTry!(XmlBeef.XmlBind.CheckStrict(_node, {}, {}, {}, {}));\n", attributesExpr, elementsExpr, allExpr, textExpr);
+			read.AppendF("\tTry!(XmlBeef.XmlBind.CheckStrict(_node, {}, {}, {}, {}, {}));\n", attributesExpr, elementsExpr, allExpr, allAttributesExpr, textExpr);
 		read.Append("\treturn .Ok;\n}\n");
 		write.Append("\treturn .Ok;\n}\n");
 
@@ -178,6 +191,16 @@ public static class XmlSerializerCodeGen
 		public Type mElement;
 		public Kind mElementKind;
 		public Type mElementConverter;
+		/// A Dictionary: mElement* describe its values, these its keys and shape (names as literals;
+		/// mEntryType: TypedEntries' element name for scalar or struct values).
+		public Type mKeyType;
+		public Kind mKeyKind;
+		public XmlMapStyle mMapStyle;
+		public bool mWrapped;
+		public String mMapEntry = new .() ~ delete _;
+		public String mMapKey = new .() ~ delete _;
+		public String mMapValue = new .() ~ delete _;
+		public String mEntryType = new .() ~ delete _;
 
 		public this()
 		{
@@ -281,10 +304,12 @@ public static class XmlSerializerCodeGen
 			plan.mRole = .ElementList;
 		else if (objectList)
 			plan.mRole = .ChildObjects;
+		else if (kind == .Dictionary)
+			PlanMap(plan, field, useConverter, typeNamespace, ownerName);
 		else
 		{
 			let typeName = fieldType.GetFullName(.. scope .());
-			Fail(ownerName, field.Name, scope $"XML serialization does not support fields of type {typeName}. Supported: bool, integers, float, double, String, enums, [XmlObject] types, and Lists of those; also types with a converter ([XmlConverter] registration or [XmlUseConverter] on the field). Mark the field [XmlIgnore] to leave it out.");
+			Fail(ownerName, field.Name, scope $"XML serialization does not support fields of type {typeName}. Supported: bool, integers, float, double, String, enums, [XmlObject] types, Lists of those, and Dictionaries with String, integer or enum keys and values of those; also types with a converter ([XmlConverter] registration or [XmlUseConverter] on the field). Mark the field [XmlIgnore] to leave it out.");
 			plan.mRole = .Attribute;
 		}
 
@@ -327,6 +352,91 @@ public static class XmlSerializerCodeGen
 		return plan;
 	}
 
+	/// A Dictionary field's plan: its key and value kinds and its shape ([XmlMap]), checked.
+	[Comptime]
+	static void PlanMap(FieldPlan plan, FieldInfo field, Type useConverter, StringView typeNamespace, StringView ownerName)
+	{
+		plan.mRole = .Map;
+		let fieldType = field.FieldType;
+		let keyType = DictionaryKey(fieldType);
+		let valueType = DictionaryValue(fieldType);
+		plan.mKeyType = keyType;
+		plan.mKeyKind = KeyKind(keyType);
+		if (plan.mKeyKind == .Unsupported)
+			Fail(ownerName, field.Name, scope $"dictionary keys must be String, integers or enums, not {keyType.GetFullName(.. scope .())}");
+		plan.mElement = valueType;
+		plan.mElementKind = LeafKind(valueType, useConverter, out plan.mElementConverter);
+		bool objectValue = plan.mElementKind == .Object;
+		if (!IsScalar(plan.mElementKind) && !objectValue)
+			Fail(ownerName, field.Name, scope $"dictionary values must be scalars or [XmlObject] types, not {valueType.GetFullName(.. scope .())}");
+
+		let map = MapOf(field);
+		plan.mMapStyle = map.Style;
+		plan.mWrapped = map.Wrapped;
+		StringView key = default;
+		StringView entry = default;
+		StringView value = default;
+		switch (map.Style)
+		{
+		case .TypedEntries:
+			key = "name";
+		case .Entries:
+			key = "key";
+			entry = "entry";
+		case .KeyValueElements:
+			key = "key";
+			entry = "entry";
+			value = "value";
+		case .KeysAsNames, .Attributes:
+		}
+		if (map.Key != null)
+			key = map.Key;
+		if (map.Entry != null)
+			entry = map.Entry;
+		if (map.Value != null)
+			value = map.Value;
+		for (let name in StringView[3](key, entry, value))
+		{
+			if (!name.IsEmpty)
+				CheckName(ownerName, field.Name, name);
+		}
+		AppendLiteral(plan.mMapKey, key);
+		AppendLiteral(plan.mMapValue, value);
+
+		XmlNaming naming = CaseNaming(plan);
+		switch (map.Style)
+		{
+		case .TypedEntries:
+			// Scalars and structs: one element name; classes: their subtypes' names, dispatched on reading
+			let typeName = scope String();
+			if (map.Entry != null)
+				typeName.Append(map.Entry);
+			else if (objectValue)
+				ElementName(valueType, typeName);
+			else
+				ScalarTypeName(valueType, plan.mElementKind, naming, typeName);
+			AppendLiteral(plan.mEntryType, typeName);
+			// Wrapped, every element is an entry (one of another type is an error); unwrapped, the
+			// entries are told from the element's other children by name
+			AppendLiteral(plan.mMapEntry, map.Wrapped ? "" : typeName);
+			if (!map.Wrapped && objectValue && !valueType.IsValueType)
+				Fail(ownerName, field.Name, "an unwrapped TypedEntries dictionary needs scalar or struct values (a class's subtypes have element names of their own)");
+		case .Attributes:
+			if (objectValue)
+				Fail(ownerName, field.Name, "an Attributes dictionary needs scalar values: an object cannot be an attribute");
+			AppendLiteral(plan.mMapEntry, "");
+		default:
+			AppendLiteral(plan.mMapEntry, entry);
+		}
+		if (map.Style == .Entries && !value.IsEmpty && objectValue)
+			Fail(ownerName, field.Name, "[XmlMap] Value puts each value in an attribute: the values must be scalars");
+		if (objectValue && !valueType.IsValueType && valueType.IsAbstract && map.Style != .TypedEntries)
+			Fail(ownerName, field.Name, "a dictionary of an abstract type needs TypedEntries (the entry's element name says its type)");
+		// The key attribute is on the object's own element
+		if (objectValue && (map.Style == .TypedEntries || map.Style == .Entries) && ClaimsAttribute(valueType, key))
+			Fail(ownerName, field.Name, scope $"the key attribute `{key}` is also an attribute of {valueType.GetFullName(.. scope .())}: give the key another name ([XmlMap(Key = ...)])");
+	}
+
 	/// Over the whole [XmlObject] chain from `type` (a base's fields are read by its own XmlRead, called
 	/// first, but they share the element): the child element and attribute names the fields claim (Beef
 	/// literals, comma-separated), which an [XmlChildren] list and the strict check leave alone; whether an
@@ -334,14 +444,16 @@ public static class XmlSerializerCodeGen
 	/// that would read the same XML twice: several role attributes on a field, a second [XmlText] or
 	/// [XmlChildren], and two attributes or two child elements with one name.
 	[Comptime]
-	static void ScanChain(Type type, XmlNaming naming, StringView typeNamespace, StringView ownerName, String claimedElements, out int elementCount, String claimedAttributes, out int attributeCount, out bool allElements, out bool mapsText)
+	static void ScanChain(Type type, XmlNaming naming, StringView typeNamespace, StringView ownerName, String claimedElements, out int elementCount, String claimedAttributes, out int attributeCount, out bool allElements, out bool allAttributes, out bool mapsText)
 	{
 		elementCount = 0;
 		attributeCount = 0;
 		allElements = false;
+		allAttributes = false;
 		mapsText = false;
 		String textField = null;
 		String childrenField = null;
+		String attributesField = null;
 		// The field that maps each attribute and element name ("Type.Field")
 		let attributes = scope Dictionary<String, String>();
 		let elements = scope Dictionary<String, String>();
@@ -349,6 +461,7 @@ public static class XmlSerializerCodeGen
 		{
 			delete textField;
 			delete childrenField;
+			delete attributesField;
 			for (let entry in attributes)
 			{
 				delete entry.key;
@@ -383,17 +496,46 @@ public static class XmlSerializerCodeGen
 					mapsText = true;
 					continue;
 				}
-				if (field.HasCustomAttribute<XmlChildrenAttribute>())
+				// Catch-alls: [XmlChildren], and the unwrapped KeysAsNames (elements) and Attributes dictionaries
+				let map = MapOf(field);
+				bool unwrappedMap = DictionaryValue(field.FieldType) != null && !map.Wrapped;
+				if (field.HasCustomAttribute<XmlChildrenAttribute>() || (unwrappedMap && map.Style == .KeysAsNames))
 				{
 					if (childrenField != null)
-						FailType(ownerName, scope $"{fieldPath}: only one [XmlChildren] list is allowed in a type and its [XmlObject] bases (both would read the same elements)");
+						FailType(ownerName, scope $"{childrenField} and {fieldPath} would both take every child element no other field maps ([XmlChildren], an unwrapped KeysAsNames dictionary): only one is allowed in a type and its [XmlObject] bases");
 					childrenField = new .(fieldPath);
 					allElements = true;
+					continue;
+				}
+				if (unwrappedMap && map.Style == .Attributes)
+				{
+					if (attributesField != null)
+						FailType(ownerName, scope $"{attributesField} and {fieldPath} would both take every attribute no other field maps (unwrapped Attributes dictionaries): only one is allowed in a type and its [XmlObject] bases");
+					attributesField = new .(fieldPath);
+					allAttributes = true;
 					continue;
 				}
 				let names = scope List<String>();
 				defer { ClearAndDeleteItems!(names); }
 				bool isAttribute = ClaimedNames(field, levelNaming, names);
+				if (unwrappedMap)
+				{
+					// The entries' element name
+					ClearAndDeleteItems!(names);
+					let fieldType = field.FieldType;
+					let valueType = DictionaryValue(fieldType);
+					let valueKind = LeafKind(valueType, null, ?);
+					let entry = new String();
+					if (map.Entry != null)
+						entry.Append(map.Entry);
+					else if (map.Style != .TypedEntries)
+						entry.Append("entry");
+					else if (valueKind == .Object)
+						ElementName(valueType, entry);
+					else
+						ScalarTypeName(valueType, valueKind, levelNaming, entry);
+					names.Add(entry);
+				}
 				let used = isAttribute ? attributes : elements;
 				for (let claim in names)
 				{
@@ -508,6 +650,8 @@ public static class XmlSerializerCodeGen
 			return .Object;
 		if (ListElement(type) != null)
 			return .List;
+		if (DictionaryValue(type) != null)
+			return .Dictionary;
 		return .Unsupported;
 	}
 
@@ -515,7 +659,96 @@ public static class XmlSerializerCodeGen
 	[Comptime]
 	static bool IsScalar(Kind kind)
 	{
-		return kind != .Object && kind != .List && kind != .Unsupported;
+		return kind != .Object && kind != .List && kind != .Dictionary && kind != .Unsupported;
+	}
+
+	/// The V of a Dictionary<K, V>, or null.
+	[Comptime]
+	static Type DictionaryValue(Type type)
+	{
+		if (let specialized = type as SpecializedGenericType)
+		{
+			if (specialized.UnspecializedType == typeof(Dictionary<,>))
+				return specialized.GetGenericArg(1);
+		}
+		return null;
+	}
+
+	/// The K of a Dictionary<K, V>, or null.
+	[Comptime]
+	static Type DictionaryKey(Type type)
+	{
+		if (let specialized = type as SpecializedGenericType)
+		{
+			if (specialized.UnspecializedType == typeof(Dictionary<,>))
+				return specialized.GetGenericArg(0);
+		}
+		return null;
+	}
+
+	/// The kind of a dictionary key type, or Unsupported: String, integers (decimal text) and simple enums
+	/// (their case names).
+	[Comptime]
+	static Kind KeyKind(Type type)
+	{
+		if (type == typeof(String))
+			return .String;
+		if (type == typeof(char8) || type == typeof(char16) || type == typeof(char32) || type == typeof(bool))
+			return .Unsupported;
+		if (type.IsInteger)
+			return .Integer;
+		if (type.IsEnum && !type.IsUnion)
+			return .Enum;
+		return .Unsupported;
+	}
+
+	/// The [XmlMap] of a field, or the defaults.
+	[Comptime]
+	static XmlMapAttribute MapOf(FieldInfo field)
+	{
+		if (field.GetCustomAttribute<XmlMapAttribute>() case .Ok(let map))
+			return map;
+		return XmlMapAttribute();
+	}
+
+	/// TypedEntries: the element name of a scalar value type (`string`, `bool`, `int32`, `double`; an
+	/// enum's or converter type's name through the naming).
+	[Comptime]
+	static void ScalarTypeName(Type type, Kind kind, XmlNaming naming, String name)
+	{
+		if (type == typeof(String))
+			name.Append("string");
+		else if (kind == .Bool || kind == .Integer || kind == .Float)
+			name.Append(type.GetName(.. scope .())..ToLower());
+		else
+			ApplyNaming(type.GetName(.. scope .()), naming, name);
+	}
+
+	/// Whether an [XmlObject] type (with its bases) maps an attribute named `name`.
+	[Comptime]
+	static bool ClaimsAttribute(Type type, StringView name)
+	{
+		for (Type level = type; level != null && level.HasCustomAttribute<XmlObjectAttribute>(); level = level.IsValueType ? null : level.BaseType)
+		{
+			XmlNaming naming = .AsDeclared;
+			if (level.GetCustomAttribute<XmlObjectAttribute>() case .Ok(let attribute))
+				naming = attribute.Naming;
+			for (let field in level.GetFields())
+			{
+				if (!IsSerialized(level, field))
+					continue;
+				let names = scope List<String>();
+				defer { ClearAndDeleteItems!(names); }
+				if (!ClaimedNames(field, naming, names))
+					continue;
+				for (let claim in names)
+				{
+					if (claim == name)
+						return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	/// The kind and converter of a scalar leaf: the [XmlUseConverter] one when given, else as classified.
@@ -1071,6 +1304,171 @@ public static class XmlSerializerCodeGen
 		}
 		code.AppendF("default:\n\treturn .Err(XmlBeef.XmlBind.UnknownChild(_c, \"{}\"));\n}}\n", expected);
 		return code;
+	}
+
+	/// `XmlBeef.XmlMapStyle.X`.
+	[Comptime]
+	static void StyleExpr(XmlMapStyle style, String code)
+	{
+		code.Append("XmlBeef.XmlMapStyle.");
+		style.ToString(code);
+	}
+
+	/// The key attribute an object value's element carries (TypedEntries, Entries), for the strict check.
+	[Comptime]
+	static StringView EntryKeyAttribute(FieldPlan plan)
+	{
+		return (plan.mMapStyle == .TypedEntries || plan.mMapStyle == .Entries) ? plan.mMapKey : "\"\"";
+	}
+
+	/// A Dictionary (see XmlMapStyle): the entries of its wrapper, or unwrapped of the element, read into
+	/// it after emptying it (owned keys and values deleted on a heap read). Each key is added before its
+	/// value is read, so the dictionary owns it if reading fails; the last of repeated keys wins.
+	[Comptime]
+	static void EmitReadMap(String code, StringView ownerName, StringView name, FieldPlan plan, StringView claimed)
+	{
+		StringView req = plan.mRequired ? "true" : "false";
+		let keyType = plan.mKeyType;
+		let valueType = plan.mElement;
+		bool objectValue = plan.mElementKind == .Object;
+		bool ownsKeys = keyType == typeof(String);
+		bool ownsValues = !valueType.IsValueType;
+		code.Append("\t{\n\t\tXmlBeef.XmlNode _dn = _node;\n\t\tbool _found = true;\n");
+		if (plan.mWrapped)
+		{
+			code.AppendF("\t\t_found = Try!(XmlBeef.XmlBind.FindElement(_node, {}, {}, {}, out _dn));\n", plan.mName, plan.mNamespace, plan.mAliases.IsEmpty ? req : "false");
+			for (int a < plan.mAliases.Count)
+				code.AppendF("\t\tif (!_found)\n\t\t\t_found = Try!(XmlBeef.XmlBind.FindElement(_node, {}, {}, {}, out _dn));\n", plan.mAliases[a], plan.mNamespace, (a == plan.mAliases.Count - 1) ? req : "false");
+		}
+		code.Append("\t\tif (_found)\n\t\t{\n");
+		code.AppendF("\t\t\tif (this.{0} == null)\n\t\t\t\tthis.{0} = {1};\n\t\t\telse\n\t\t\t{{\n", name, NewExpr(plan.mType.GetFullName(.. scope .()), "", .. scope .()));
+		if (ownsKeys || ownsValues)
+		{
+			code.AppendF("\t\t\t\tif (_alloc == null)\n\t\t\t\t{{\n\t\t\t\t\tfor (let _old in this.{})\n\t\t\t\t\t{{\n", name);
+			if (ownsKeys)
+				code.Append("\t\t\t\t\t\tdelete _old.key;\n");
+			if (ownsValues)
+				code.Append("\t\t\t\t\t\tdelete _old.value;\n");
+			code.Append("\t\t\t\t\t}\n\t\t\t\t}\n");
+		}
+		code.AppendF("\t\t\t\tthis.{}.Clear();\n\t\t\t}}\n\t\t\tlet _m = this.{};\n", name, name);
+		let style = StyleExpr(plan.mMapStyle, .. scope .());
+		code.AppendF("\t\t\tfor (let _me in XmlBeef.XmlMapEntries(_dn, {}, {}, {}, {}, {}, {}))\n\t\t\t{{\n", style, plan.mMapEntry, plan.mMapKey, plan.mMapValue, plan.mNamespace, claimed);
+		code.Append("\t\t\t\tTry!(_me.Check());\n\t\t\t\tif (!_me.mHasValue)\n\t\t\t\t\tcontinue;\n");
+		// A TypedEntries entry must be of the value's type (a class's subtypes are dispatched instead)
+		if (plan.mMapStyle == .TypedEntries && !(objectValue && !valueType.IsValueType))
+			code.AppendF("\t\t\t\tTry!(XmlBeef.XmlBind.CheckEntryType(_me.mElement, {}));\n", plan.mEntryType);
+		XmlNaming naming = CaseNaming(plan);
+		if (ownsKeys)
+		{
+			code.AppendF("\t\t\t\tif (_m.TryAddAlt(_me.mKey.mText, let _kp, let _vp))\n\t\t\t\t\t*_kp = {};\n", NewExpr("String", "_me.mKey.mText", .. scope .()));
+		}
+		else
+		{
+			code.AppendF("\t\t\t\t{} _key = default;\n\t\t\t\t{{\n\t\t\t\t\tlet _r = _me.mKey;\n", keyType.GetFullName(.. scope .()));
+			EmitConvert(code, "\t\t\t\t\t", "_key", false, keyType, plan.mKeyKind, null, naming);
+			code.Append("\t\t\t\t}\n\t\t\t\tif (_m.TryAdd(_key, ?, let _vp))\n\t\t\t\t{\n\t\t\t\t}\n");
+		}
+		// A repeated key: the earlier value goes
+		if (ownsValues)
+			code.Append("\t\t\t\telse if (_alloc == null)\n\t\t\t\t\tdelete *_vp;\n");
+		code.Append("\t\t\t\t*_vp = default;\n");
+		if (!objectValue)
+		{
+			code.Append("\t\t\t\t{\n\t\t\t\t\tlet _r = _me.mValue;\n");
+			EmitConvert(code, "\t\t\t\t\t", "(*_vp)", false, valueType, plan.mElementKind, plan.mElementConverter, naming);
+			code.Append("\t\t\t\t}\n");
+		}
+		else if (valueType.IsValueType)
+		{
+			code.AppendF("\t\t\t\t*_vp = .();\n\t\t\t\tlet _saved = XmlBeef.XmlBind.EnterEntry(_me.mElement, {});\n\t\t\t\tdefer XmlBeef.XmlBind.LeaveEntry(_saved);\n\t\t\t\tTry!((*_vp).XmlRead(_me.mElement, _alloc));\n", EntryKeyAttribute(plan));
+		}
+		else if (plan.mMapStyle == .TypedEntries)
+		{
+			// The entry's element name says which subtype it is
+			code.AppendF("\t\t\t\tSystem.Compiler.Mixin(XmlBeef.XmlSerializerCodeGen.MapDispatch(typeof({}), ", valueType.GetFullName(.. scope .()));
+			AppendLiteral(code, ownerName);
+			code.Append(", ");
+			AppendLiteral(code, name);
+			code.AppendF(", {}));\n", AppendLiteral(.. scope .(), EntryKeyAttribute(plan).Substring(1, EntryKeyAttribute(plan).Length - 2)));
+		}
+		else
+		{
+			code.AppendF("\t\t\t\tlet _o = {};\n\t\t\t\t*_vp = _o;\n\t\t\t\tlet _saved = XmlBeef.XmlBind.EnterEntry(_me.mElement, {});\n\t\t\t\tdefer XmlBeef.XmlBind.LeaveEntry(_saved);\n\t\t\t\tTry!(_o.XmlRead(_me.mElement, _alloc));\n",
+				NewExpr(valueType.GetFullName(.. scope .()), "", .. scope .()), EntryKeyAttribute(plan));
+		}
+		code.Append("\t\t\t}\n\t\t}\n\t}\n");
+	}
+
+	/// @brief The `switch` that reads a TypedEntries dictionary entry `_me` into its value slot `_vp`, one
+	/// case per [XmlObject] type the dictionary's value type can be. Mixed into the generated XmlRead when
+	/// it is compiled.
+	/// @param element The dictionary's value type.
+	/// @param ownerName The type holding the dictionary, for errors.
+	/// @param fieldName The dictionary field.
+	/// @param key The key attribute's name.
+	/// @return The code.
+	[Comptime]
+	public static String MapDispatch(Type element, String ownerName, String fieldName, String key)
+	{
+		let types = scope List<Type>();
+		ChildTypes(element, types);
+		if (!element.IsAbstract && element.HasCustomAttribute<XmlObjectAttribute>() && !types.Contains(element))
+			types.Insert(0, element);
+		if (types.IsEmpty)
+			Fail(ownerName, fieldName, scope $"found no [XmlObject] type for {element.GetFullName(.. scope .())}: mark the value types [XmlObject]");
+		let expected = scope String();
+		for (let type in types)
+		{
+			if (!expected.IsEmpty)
+				expected.Append(", ");
+			ElementName(type, expected);
+		}
+		let code = new String();
+		code.Append("let _saved = XmlBeef.XmlBind.EnterEntry(_me.mElement, ");
+		AppendLiteral(code, key);
+		code.Append(");\ndefer XmlBeef.XmlBind.LeaveEntry(_saved);\nswitch (_me.mElement.LocalName)\n{\n");
+		for (let type in types)
+		{
+			code.Append("case ");
+			AppendLiteral(code, ElementName(type, .. scope .()));
+			code.AppendF(":\n\tlet _o = {0};\n\t*_vp = _o;\n\tTry!(_o.XmlRead(_me.mElement, _alloc));\n", NewExpr(type.GetFullName(.. scope .()), "", .. scope .()));
+		}
+		code.AppendF("default:\n\treturn .Err(XmlBeef.XmlBind.UnknownChild(_me.mElement, \"{}\"));\n}}\n", expected);
+		return code;
+	}
+
+	/// A Dictionary written in place through an XmlMapWriter: each key into its entry (kept where it is),
+	/// new keys appended, keys no longer there removed; a null dictionary removes its wrapper (or,
+	/// unwrapped, its entries).
+	[Comptime]
+	static void EmitWriteMap(String code, StringView name, FieldPlan plan, StringView claimed)
+	{
+		let valueType = plan.mElement;
+		bool objectValue = plan.mElementKind == .Object;
+		XmlNaming naming = CaseNaming(plan);
+		code.Append("\t{\n");
+		EmitRenameAliases(code, plan, false);
+		code.Append("\t\tXmlBeef.XmlNode _dn = _node;\n");
+		if (plan.mWrapped)
+			code.AppendF("\t\tif (this.{0} == null)\n\t\t\tXmlBeef.XmlBind.RemoveElement(_node, {1}, {2});\n\t\telse\n\t\t\t_dn = XmlBeef.XmlBind.ChildElement(_node, {1}, {2});\n\t\tif (this.{0} != null)\n", name, plan.mName, plan.mNamespace);
+		let style = StyleExpr(plan.mMapStyle, .. scope .());
+		code.AppendF("\t\t{{\n\t\t\tlet _mw = scope XmlBeef.XmlMapWriter(_dn, {}, {}, {}, {}, {}, {});\n", style, plan.mMapEntry, plan.mMapKey, plan.mMapValue, plan.mNamespace, claimed);
+		code.AppendF("\t\t\tif (this.{0} != null)\n\t\t\t{{\n\t\t\t\tfor (let _kv in this.{0})\n\t\t\t\t{{\n\t\t\t\t\tlet _k = scope String();\n\t\t\t\t\t{{\n\t\t\t\t\t\tlet _t = _k;\n\t\t\t\t\t\tbool _has = true;\n", name);
+		EmitFormat(code, "\t\t\t\t\t\t", "_kv.key", plan.mKeyType, plan.mKeyKind, null, naming);
+		code.Append("\t\t\t\t\t}\n");
+		StringView entryType = (plan.mMapStyle == .TypedEntries) ? plan.mEntryType : "\"\"";
+		if (!objectValue)
+		{
+			code.Append("\t\t\t\t\t{\n\t\t\t\t\t\tlet _t = scope String();\n\t\t\t\t\t\tbool _has = true;\n");
+			EmitFormat(code, "\t\t\t\t\t\t", "_kv.value", valueType, plan.mElementKind, plan.mElementConverter, naming);
+			code.AppendF("\t\t\t\t\t\tif (_has)\n\t\t\t\t\t\t\tTry!(_mw.SetScalar(_k, {}, _t));\n\t\t\t\t\t}}\n", entryType);
+		}
+		else if (valueType.IsValueType)
+			code.AppendF("\t\t\t\t\tTry!(_kv.value.XmlWrite(Try!(_mw.ObjectElement(_k, {}, {}))));\n", entryType, AppendLiteral(.. scope .(), TypeNamespace(valueType, .. scope .())));
+		else
+			code.Append("\t\t\t\t\tif (_kv.value != null)\n\t\t\t\t\t{\n\t\t\t\t\t\tXmlBeef.IXmlSerializable _s = _kv.value;\n\t\t\t\t\t\tTry!(_s.XmlWrite(Try!(_mw.ObjectElement(_k, _s.XmlElementName, _s.XmlElementNamespace))));\n\t\t\t\t\t}\n");
+		code.Append("\t\t\t\t}\n\t\t\t}\n\t\t\t_mw.Finish();\n\t\t}\n\t}\n");
 	}
 
 	[Comptime]

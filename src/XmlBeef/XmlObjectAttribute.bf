@@ -25,7 +25,10 @@ namespace XmlBeef;
 /// - List<[XmlObject] type>: repeated child elements named after the item type (its Name);
 /// - [XmlArray] on a List: the items inside a wrapper element (`<tags><tag>a</tag></tags>`);
 /// - [XmlChildren] List<T>: every child element no other field claims, each read as the [XmlObject]
-///   type assignable to T whose element name it has (found at compile time).
+///   type assignable to T whose element name it has (found at compile time);
+/// - Dictionary<K, V> (K a String, integer or enum; V a scalar or [XmlObject] type): a wrapper element
+///   named after the field with one entry per key, named after the value's type, the key in an
+///   attribute: `<limits><int32 name="retries">3</int32></limits>` (see XmlMap).
 ///
 /// Names are the declared names by default (see Naming, XmlName); enums are their case names in the
 /// same naming. Any other field type stops the build with an error naming the field; [XmlIgnore]
@@ -157,6 +160,56 @@ public struct XmlArrayAttribute : Attribute
 	/// @brief The items' local name (unset: for objects, the item type's element name; for scalars,
 	/// `item`).
 	public String Item;
+}
+
+/// @brief The XML shape of a Dictionary field (see XmlMap).
+public enum XmlMapStyle
+{
+	/// @brief One element per key named after the value's type, the key in an attribute:
+	/// `<int32 name="retries">3</int32>` (the default). Explicit about types; an [XmlObject] value is
+	/// the entry element itself, and a dictionary of a base class reads each entry as the subtype its
+	/// element name says. Key: the key attribute (`name`); Entry: the element name for scalar values
+	/// (the value type's name: `string`, `bool`, `int32`, `double`, an enum's name through the naming).
+	TypedEntries,
+	/// @brief One element per key with a fixed name, the key in an attribute: `<entry key="a">1</entry>`;
+	/// with Value, the value in an attribute too: `<add key="a" value="1"/>` (.NET appSettings). Entry
+	/// (`entry`), Key (`key`), Value (unset: the text).
+	Entries,
+	/// @brief One element per key holding a key element and a value element:
+	/// `<entry><key>a</key><value>1</value></entry>` (JAXB's form); any key, any value. Entry (`entry`),
+	/// Key (`key`), Value (`value`).
+	KeyValueElements,
+	/// @brief One element per key, named by the key: `<timeout>30</timeout>`. Compact for configuration,
+	/// but only keys that are XML names can be written (an error otherwise).
+	KeysAsNames,
+	/// @brief The keys are attribute names, the values their values: `<limits a="1" b="2"/>`. Scalar
+	/// values only.
+	Attributes
+}
+
+/// @brief How a Dictionary<K, V> field is mapped (K a String, integer or enum; V a scalar or [XmlObject]
+/// type). Without it: TypedEntries in a wrapper element named after the field:
+/// `<limits><int32 name="retries">3</int32></limits>`.
+///
+/// Unwrapped (`Wrapped = false`) the entries are in the element itself; KeysAsNames then takes every
+/// child element and Attributes every attribute that no other field maps, a catch-all for what a type
+/// does not model. Reading checks names (a TypedEntries entry of another type is an error) and lets the
+/// last of repeated keys win; writing updates the entries in place by key, appends new keys, and
+/// removes keys the dictionary no longer has (a null value removes its entry).
+[AttributeUsage(.Field)]
+public struct XmlMapAttribute : Attribute
+{
+	/// @brief The shape.
+	public XmlMapStyle Style;
+	/// @brief The key's attribute or element name (the style's default when unset).
+	public String Key;
+	/// @brief The entries' element name (the style's default when unset).
+	public String Entry;
+	/// @brief Entries: the value's attribute name (unset: the value is the text); KeyValueElements: the
+	/// value element's name.
+	public String Value;
+	/// @brief Whether the entries are inside a wrapper element named after the field (the default).
+	public bool Wrapped = true;
 }
 
 /// @brief Maps a List<T> field to every child element that no other field claims; each child is read as

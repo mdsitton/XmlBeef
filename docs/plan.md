@@ -442,7 +442,8 @@ byte-exact round trips of every accepted suite input and every corpus SVG; edits
 attributes, `[XmlText]`, wrapped lists, aliases, strict types, converters and allocators
 (`architecture.md` §6); `bench/compare/run-typed.sh` reads `osm.xml` into one model with XmlBeef,
 quick-xml + serde, Go and .NET, all checked; its timed run waits for a quiet machine with P3T.
-Dictionaries are left out (`status.md` T1).* The generator with §4.12's roles; a typed benchmark
+Dictionaries map in five shapes chosen per field (`[XmlMap]`; the author's default: TypedEntries,
+`<int32 name="k">v</int32>`).* The generator with §4.12's roles; a typed benchmark
 against quick-xml + serde, Go `encoding/xml` Unmarshal and .NET `XmlSerializer`.
 
 **Phase 7 — Collect-errors, then extras.** Collect-errors with recovery (required before the

@@ -34,6 +34,7 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 | `XmlObjectAttribute.bf` | `[XmlObject]` and the field attributes, `XmlNaming`, `IXmlSerializable`, `IXmlConverter<T>` |
 | `XmlSerializerCodeGen.bf` | The comptime generator of `[XmlObject]` (§6) |
 | `XmlBind.bf` | The generated code's runtime: `XmlValueRef`, `XmlValueWriter`, the cursors, `XmlBind` |
+| `XmlMap.bf` | Dictionaries' runtime: `XmlMapEntries` (reading), `XmlMapWriter` (writing in place) |
 | `XmlSerializer.bf` | One-call `Read`/`ReadFile`/`Write`/`WriteFile` of whole documents as `[XmlObject]` types |
 | `XmlNode.bf` | `XmlNodeId`, the `XmlNode` handle (kind, names, value, navigation), `XmlNodeList`, `XmlElementList`, `XmlAttribute`, `XmlAttributeList` |
 | `XmlNode.Lookup.bf` | `Find` (by name, by namespace and local name), attribute lookups and typed getters, `Text`/`AppendText`/`AppendInnerText`, `XmlDescendants`, `XmlValueParser` |
@@ -383,7 +384,22 @@ KdlBeef's `[KdlObject]` design (`plan.md` §4.12) with XML's roles.
   child element no other field claims, dispatched by local name to the concrete `[XmlObject]` types
   assignable to T (found through `Type.TypeDeclarations` when the method is compiled, so they may
   derive from the type being generated) and written through the interface so each item's own type
-  decides. Dictionaries are not supported: XML has no one shape for them.
+  decides.
+- **Dictionaries** (`Dictionary<K, V>`, K a String, integer or enum, V a scalar or `[XmlObject]`)
+  take one of five shapes, `[XmlMap(Style = …)]`, since XML has no single one and formats differ:
+  `TypedEntries`, the default (`<int32 name="retries">3</int32>`: the entry named after the value's
+  type, explicit about types; a dictionary of a base class reads each entry as the subtype its name
+  says), `Entries` (`<entry key="k">v</entry>`, or with `Value` `<add key="k" value="v"/>`),
+  `KeyValueElements` (`<entry><key>k</key><value>v</value></entry>`, any key), `KeysAsNames`
+  (`<k>v</k>`, keys that are names) and `Attributes` (`<limits a="1"/>`). `Key`, `Entry` and `Value`
+  rename the parts. They sit in a wrapper element named after the field, or with `Wrapped = false` in
+  the element itself, where `KeysAsNames` and `Attributes` become catch-alls for the child elements or
+  attributes no other field maps. An object value is the entry element itself (TypedEntries, Entries)
+  and carries the key attribute, which a strict value type then allows (`XmlBind.EnterEntry`); a
+  value type that maps an attribute with the key's name stops the build. Reading (`XmlMapEntries`)
+  checks a TypedEntries entry's type and lets the last of repeated keys win; writing
+  (`XmlMapWriter`) indexes the entries by key once, updates each in place, appends new keys with
+  their neighbors' indentation, removes the rest, and reports a key that cannot be written as a name.
 - **Names and namespaces.** Names are as declared by default (`plan.md` §9 item 10), with
   `CamelCase`, `KebabCase`, `SnakeCase` and `Lower` policies per type, `[XmlName]` per field and
   `[XmlAlias]` for older names (read; renamed when written). A type's `Namespace` applies to its
