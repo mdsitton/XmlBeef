@@ -44,7 +44,8 @@ internal class XmlReaderCoreBase
 		/// Document offset of its `<`.
 		public int32 mStart;
 		/// Its `<`'s line and column, when the cursor cannot look back (a stream): the unclosed-element
-		/// error at the end needs them. 0: locate the offset then.
+		/// error at the end needs them. Line 0: locate the offset then; -1: not located yet
+		/// (ResolvePositions, before the stream's buffer moves).
 		public int32 mLine;
 		public int32 mColumn;
 	}
@@ -524,6 +525,8 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 			// Recovery: the unclosed elements were reported; close them
 			if (mClosingAtEnd)
 				return EndElement(p, p);
+			if (mCursor.LocatesOnlyForward)
+				ResolvePositions();
 			let open = mElements.Back;
 			return .Err(FailAt(.UnclosedElement, scope $"The element `{mNames[open.mName]}` is not closed", open.mStart, open.mLine, open.mColumn, 1 + mNames[open.mName].Length));
 		}
@@ -687,6 +690,8 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 	{
 		if (mFrames.Count > 0)
 			return false;
+		if (mCursor.LocatesOnlyForward && !mElements.IsEmpty && mElements.Back.mLine == -1)
+			ResolvePositions();
 		char8* oldData = mData;
 		int oldBase = mBase;
 		int oldEnd = mEnd;
@@ -700,6 +705,27 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 			return false;
 		}
 		return pos + count <= mEnd;
+	}
+
+	/// Streams, before the buffer may move: the positions of the open elements read since the last time
+	/// (the top of the stack), located in document order while their bytes are in the window. Elements
+	/// that ended before are never located, so start tags cost nothing for positions.
+	[NoInline]
+	void ResolvePositions()
+	{
+		int first = mElements.Count;
+		while (first > 0 && mElements[first - 1].mLine == -1)
+			first--;
+		for (int i = first; i < mElements.Count; i++)
+		{
+			ref Element element = ref mElements[i];
+			element.mLine = 0;
+			if (mCursor.Locate(element.mStart, let line, let column))
+			{
+				element.mLine = (int32)line;
+				element.mColumn = (int32)column;
+			}
+		}
 	}
 
 	/// After a stream's buffer moved: the views of the old window taken for the event being read (its

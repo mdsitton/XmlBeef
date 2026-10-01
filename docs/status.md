@@ -36,20 +36,23 @@ review's P02 (2026-10-01, after its R fixes) and now; the stream rows read the s
 | Event pass, phase 3 | 16.1 | 9.4 | 8.7 | 24.6 | 16.1 | 30.5 | 25.9 | 10.8 |
 | Event pass, phase 5 | 16.3 | 9.1 | 8.6 | 25.5 | 16.3 | 30.4 | 26.3 | 11.3 |
 | Event pass, before P02 | 16.4 | 9.1 | 8.6 | 25.9 | 16.8 | 30.6 | 26.8 | 11.6 |
-| Event pass (now) | 16.0 | 8.9 | 7.9 | 25.7 | 16.7 | 30.1 | 26.5 | 11.5 |
+| Event pass (now) | 16.1 | 8.9 | 7.9 | 25.7 | 16.7 | 30.1 | 26.5 | 11.5 |
 | Document read, phase 2 | 32.3 | 18.0 | 17.3 | 45.8 | 26.1 | 53.9 | 43.5 | 44.9 |
 | Document read, phase 3 | 18.3 | 10.0 | 9.2 | 30.9 | 18.6 | 36.1 | 30.8 | 12.4 |
 | Document read, phase 5 | 18.4 | 9.6 | 9.1 | 31.5 | 18.8 | 35.0 | 30.9 | 12.9 |
 | Document read, before P02 | 18.6 | 9.7 | 9.1 | 32.0 | 19.3 | 35.4 | 31.4 | 13.1 |
-| Document read (now) | 18.2 | 9.4 | 8.4 | 31.8 | 19.2 | 34.8 | 31.2 | 13.1 |
+| Document read (now) | 18.3 | 9.4 | 8.4 | 31.8 | 19.2 | 34.8 | 31.1 | 13.1 |
 | Stream events, before P02 | 31.6 | 45.4 | 43.0 | 64.9 | 54.1 | 67.1 | 64.5 | 30.4 |
-| Stream events (now) | 22.5 | 13.1 | 11.8 | 35.7 | 22.8 | 37.1 | 34.6 | 14.6 |
+| Stream events, after P02 | 22.5 | 13.1 | 11.8 | 35.7 | 22.8 | 37.1 | 34.6 | 14.6 |
+| Stream events (now) | 19.0 | 10.9 | 9.2 | 32.6 | 19.4 | 33.8 | 31.3 | 12.9 |
 | Stream events, 4 KiB buffer, before P02 | 34.3 | 44.2 | 42.1 | 65.0 | 54.2 | 66.8 | 64.6 | 30.5 |
-| Stream events, 4 KiB buffer (now) | 22.4 | 13.3 | 12.2 | 36.0 | 23.1 | 37.4 | 35.0 | 14.8 |
+| Stream events, 4 KiB buffer (now) | 19.3 | 11.0 | 9.5 | 33.0 | 19.9 | 34.2 | 31.7 | 13.3 |
 
 The stream's cost had been mostly line counting (a column per code point, byte by byte, for every
-start tag's position, and again for the bytes a refill drops); now it is counted 8 bytes at a time and
-once, and the scans resume their words after a refill (`architecture.md` §3).
+start tag's position, and again for the bytes a refill drops). P02 counted 8 bytes at a time and once
+and made the scans resume their words after a refill; SP1 then stopped locating start tags (only
+elements still open when the buffer moves are located) and counts newlines alone, skipping words
+without a byte below 0x0E (`architecture.md` §3). Streams now cost 1.1–1.3× the in-memory event pass.
 
 Phases 4 and 5 (positions, streams, located stream errors, the style capture) cost the event pass
 0–4% and the document read up to 4%, after two fixes found by comparing with the phase 3 build:
@@ -88,7 +91,7 @@ findings (R01-R14), performance and memory opportunities, and proposed architect
 improvements. R01-R14, P01 and P03 are fixed, each with a regression in `XmlReviewTests.bf`; its
 "Resolution" section records the fixes and the policy decisions (R06, R09, R11, R14). P02 (streamed
 scans and line counting), P04 (`Compact`, `Clear(true)`, `MemoryUsage`) and A01-A04 followed; what
-remains of them is below (RV-, SP1).
+remains of them is below (RV-); the follow-up SP1 (no per-start-tag position work in streams) is done.
 
 | ID | Item | Size |
 |----|------|------|
@@ -97,4 +100,3 @@ remains of them is below (RV-, SP1).
 | P6T | The typed benchmark's timed run: `cd bench/compare && ./run-typed.sh` on a quiet machine, with P3T | S |
 | RV-L | Known limits kept: a CR in a comment or PI data reads back as LF (no escape exists); removing a specified attribute that has a DTD default lets the default return on reading; references to unread entities stay as written after the DOCTYPE is removed (`architecture.md` §4 "Edit dependencies") | S |
 | RV-A1 | Review A01 beyond the frame window: typed document offsets versus window offsets (today both are `int`, converted by `DocOffset`/`DocEnd`) would be a wide change to the core for a small gain; not done | S |
-| SP1 | The per-start-tag line count in streams (about 2 instructions per byte) could count newlines only and find the column when an error needs it, if the line start were kept across refills | S |

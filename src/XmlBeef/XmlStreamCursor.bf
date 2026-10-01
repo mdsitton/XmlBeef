@@ -336,15 +336,23 @@ internal struct XmlBufferedStreamCursor : IXmlCursor
 			if (drop > 0)
 			{
 				// From Locate's count when it is not past the drop (it never is behind mLines): the bytes
-				// before it are not counted again
+				// before it are not counted again. Both counters' column bases move up to the drop, whose
+				// bytes are about to go.
+				char8* text = (char8*)Buffer - mBase;
 				int dropTo = mBase + drop;
 				if (mLocated.mPos <= dropTo)
 				{
-					mLocated.AdvanceTo((char8*)Buffer - mBase, dropTo, mBase + mFilled);
+					mLocated.AdvanceLines(text, dropTo, mBase + mFilled);
+					mLocated.Column(text, dropTo);
 					mLines = mLocated;
 				}
 				else
-					mLines.AdvanceTo((char8*)Buffer - mBase, Math.Max(dropTo, mLines.mPos), mBase + mFilled);
+				{
+					mLines.AdvanceLines(text, Math.Max(dropTo, mLines.mPos), mBase + mFilled);
+					mLines.Column(text, dropTo);
+					if (mLocated.mLineStart < dropTo)
+						mLocated.Column(text, dropTo);
+				}
 				Internal.MemMove(Buffer, Buffer + drop, mFilled - drop);
 				mBase += drop;
 				mFilled -= drop;
@@ -441,18 +449,15 @@ internal struct XmlBufferedStreamCursor : IXmlCursor
 		if (offset < mLines.mPos)
 			return false;
 		int target = Math.Min(offset, mBase + mFilled);
+		char8* text = (char8*)Buffer - mBase;
 		if (target >= mLocated.mPos)
 		{
-			mLocated.AdvanceTo((char8*)Buffer - mBase, target, mBase + mFilled);
-			line = mLocated.mLine;
-			column = mLocated.mColumn;
+			mLocated.Locate(text, target, mBase + mFilled, out line, out column);
 			return true;
 		}
 		// Behind the forward count (an error at an earlier offset): count from the dropped bytes
 		var lines = mLines;
-		lines.AdvanceTo((char8*)Buffer - mBase, target, mBase + mFilled);
-		line = lines.mLine;
-		column = lines.mColumn;
+		lines.Locate(text, target, mBase + mFilled, out line, out column);
 		return true;
 	}
 }

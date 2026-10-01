@@ -40,57 +40,101 @@ internal interface IXmlCursor
 	bool BomOverridesDeclaration { get; }
 }
 
-/// Counts lines and columns forward through the input, one offset at a time.
+/// Counts lines forward through the input, and columns only when asked: newlines are found 8 bytes at
+/// a time up to an offset (AdvanceLines), and a column is the code points from a base on the current
+/// line (its start, or a later offset whose column is known) to the offset (Column). A stream locates
+/// only the elements still open when its buffer moves (XmlReaderCore.ResolvePositions), errors, and the
+/// bytes it drops, so most bytes are only scanned for newlines, once.
 internal struct XmlLineCounter
 {
+	/// Newlines are counted up to here.
 	public int mPos;
 	public int mLine = 1;
-	public int mColumn = 1;
+	/// The column base: an offset on the current line (its start, or later) and its column.
+	public int mLineStart;
+	public int mLineColumn = 1;
 
 	public this(int start)
 	{
 		mPos = start;
+		mLineStart = start;
 	}
 
-	/// Moves to `offset` (not before the current position), counting every newline (CRLF as one) and
-	/// every code point. `text[mPos ..< offset]` must be available, up to `end`.
-	public void AdvanceTo(char8* text, int offset, int end) mut
+	/// Moves to `offset` (not before the current position), counting every newline (CRLF as one).
+	/// `text[mPos ..< offset]` must be available, up to `end`.
+	public void AdvanceLines(char8* text, int offset, int end) mut
 	{
-		const uint64 high = 0x8080808080808080UL;
 		while (mPos < offset)
 		{
-			if (mPos + 8 <= offset)
+			// Two words at a time while neither has a byte below 0x0E: validated text has none there but tab,
+			// LF and CR, so no newline (a word with a tab takes the exact path below)
+			while (mPos + 16 <= offset && (XmlChar.BytesBelow0E(XmlChar.Load64(text + mPos)) | XmlChar.BytesBelow0E(XmlChar.Load64(text + mPos + 8))) == 0)
+				mPos += 16;
+			if (mPos >= offset)
+				break;
+			if (mPos + 8 <= end)
 			{
-				// Eight bytes at a time: a column for each byte that starts a code point (all but the
-				// continuation bytes, 10xxxxxx), up to the first newline
+				// Every newline of the word at once: each LF, and each CR not followed by an LF (in the word,
+				// or the next byte), which then is the newline. A word past `offset` (still in the window)
+				// counts only the bytes before it.
+				int count = Math.Min(offset - mPos, 8);
 				uint64 word = XmlChar.Load64(text + mPos);
-				uint64 continuation = word & ~(word << 1) & high;
-				uint64 newlines = XmlChar.BytesEqual(word, (uint8)'\n') | XmlChar.BytesEqual(word, (uint8)'\r');
-				if (newlines == 0)
+				uint64 lf = XmlChar.BytesEqual(word, (uint8)'\n');
+				uint64 cr = XmlChar.BytesEqual(word, (uint8)'\r');
+				if ((lf | cr) != 0)
 				{
-					mColumn += continuation == 0 ? 8 : 8 - XmlChar.CountHighBits(continuation);
-					mPos += 8;
-					continue;
+					uint64 lfNext = lf >> 8;
+					if (mPos + 8 < end && text[mPos + 8] == '\n')
+						lfNext |= 1UL << 63;
+					uint64 newlines = lf | (cr & ~lfNext);
+					if (count < 8)
+						newlines &= (1UL << (count * 8)) - 1;
+					if (newlines != 0)
+					{
+						mLine += XmlChar.CountHighBits(newlines);
+						// The line starts after the last one: smeared down, its byte and those below
+						uint64 below = newlines | (newlines >> 8);
+						below |= below >> 16;
+						below |= below >> 32;
+						mLineStart = mPos + XmlChar.CountHighBits(below);
+						mLineColumn = 1;
+					}
 				}
-				// The bits below the first newline's
-				uint64 before = (newlines & (~newlines + 1)) - 1;
-				int count = XmlChar.CountHighBits(before & high);
-				mColumn += count - XmlChar.CountHighBits(continuation & before);
 				mPos += count;
+				continue;
 			}
 			int newline = XmlChar.NewlineLength(text, mPos, end);
 			if (newline > 0)
 			{
 				mPos += newline;
 				mLine++;
-				mColumn = 1;
+				mLineStart = mPos;
+				mLineColumn = 1;
 				continue;
 			}
-			// The rest of a sequence the words stopped in takes no column
-			if (((uint8)text[mPos] & 0xC0) != 0x80)
-				mColumn++;
 			mPos++;
 		}
+	}
+
+	/// The column of `offset`, which must be on the current line, at or after the base, with
+	/// `text[mLineStart ..< offset]` available. The base moves there, so the next column on the line
+	/// counts on from it. (An offset inside a CRLF, before the base, gets the base's column.)
+	public int Column(char8* text, int offset) mut
+	{
+		if (offset > mLineStart)
+		{
+			mLineColumn += XmlChar.CountCodePoints(text, mLineStart, offset);
+			mLineStart = offset;
+		}
+		return mLineColumn;
+	}
+
+	/// AdvanceLines and Column: the line and column of `offset`.
+	public void Locate(char8* text, int offset, int end, out int line, out int column) mut
+	{
+		AdvanceLines(text, offset, end);
+		line = mLine;
+		column = Column(text, offset);
 	}
 }
 
@@ -184,9 +228,7 @@ internal struct XmlByteCursor : IXmlCursor
 			XmlChar.LineAndColumn(mText, target, out line, out column);
 			return true;
 		}
-		mLines.AdvanceTo(mText.Ptr, target, mText.Length);
-		line = mLines.mLine;
-		column = mLines.mColumn;
+		mLines.Locate(mText.Ptr, target, mText.Length, out line, out column);
 		return true;
 	}
 }

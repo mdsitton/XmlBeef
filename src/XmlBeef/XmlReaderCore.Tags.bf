@@ -147,12 +147,10 @@ extension XmlReaderCore<TCursor>
 		element.mFrameLevel = (int32)mFrames.Count;
 		element.mBindings = (int32)bindingStart;
 		element.mStart = (int32)DocOffset(start);
-		// A stream cannot look back for the unclosed-element error at the end: locate it now
-		if (mCursor.LocatesOnlyForward && mCursor.Locate(element.mStart, let line, let column))
-		{
-			element.mLine = (int32)line;
-			element.mColumn = (int32)column;
-		}
+		// A stream cannot look back for the unclosed-element error at the end: located if it is still open
+		// when the buffer moves (most elements end before)
+		if (mCursor.LocatesOnlyForward)
+			element.mLine = -1;
 		mNameId = name;
 		mName = mNames[name];
 		mNamespace = ns;

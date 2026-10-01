@@ -124,12 +124,15 @@ window moves, the core rebases every view it holds (`RebaseViews`: the name, val
 fields, attribute views). Entity frames read stored replacement text, so `Grow` is off inside them
 and the outer window is kept by `mRetain`. Line and column are counted forward only
 (`LocatesOnlyForward`), so positions an error may need later (an open element's start) are located
-when they are read: every start tag counts on to its `<`, which makes the line counter
-(`XmlLineCounter.AdvanceTo`) part of every streamed byte's cost. It counts 8 bytes at a time (a column
-per byte that is not a UTF-8 continuation byte, up to the first CR or LF, which is stepped singly so
-CRLF stays one newline), and `Fill` continues that count to the bytes it drops rather than counting
-them again (review P02: streaming cost 2–5× the in-memory event pass in instructions, now 1.2–1.5×;
-`bench/instructions.sh`'s `stream` and `stream4k` columns). A stream whose whole input fits in the first read is checked as memory input is,
+before the bytes go. A start tag only marks its element unlocated; before `Grow` lets the buffer
+move, the open elements read since the last time are located, in document order
+(`ResolvePositions`), so an element that ends within the buffer, almost every one, is never located.
+The line counter (`XmlLineCounter`) counts newlines only, every byte once (the bytes `Fill` drops, up
+to the located elements, errors): two words at a time while neither has a byte below 0x0E (validated
+text has none there but tab, LF and CR), else every LF and lone CR of a word at once. A column is
+counted only when asked, from a base on the current line (its start, the drop point, or the last
+column asked for) that moves up with it. Review P02 and SP1: streaming cost 2–5× the in-memory event
+pass in instructions, now 1.1–1.3× (`bench/instructions.sh`'s `stream` and `stream4k` columns). A stream whose whole input fits in the first read is checked as memory input is,
 so both paths give identical first errors: the scripts' stream modes compare every not-wf case's
 message with the golden one.
 

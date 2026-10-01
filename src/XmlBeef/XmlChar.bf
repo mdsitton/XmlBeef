@@ -433,6 +433,36 @@ internal static class XmlChar
 		return (control & ~allowed) == 0;
 	}
 
+	/// Nonzero when `word` has a byte below 0x0E (exact as to whether there is one).
+	[Inline]
+	public static uint64 BytesBelow0E(uint64 word)
+	{
+		return (word - 0x0E0E0E0E0E0E0E0EUL) & ~word & 0x8080808080808080UL;
+	}
+
+	/// The number of code points in `text[from ..< to]`: its bytes that are not UTF-8 continuation bytes
+	/// (10xxxxxx), counted 8 at a time.
+	public static int CountCodePoints(char8* text, int from, int to)
+	{
+		const uint64 high = 0x8080808080808080UL;
+		int count = 0;
+		int p = from;
+		while (p + 8 <= to)
+		{
+			uint64 word = Load64(text + p);
+			uint64 continuation = word & ~(word << 1) & high;
+			count += continuation == 0 ? 8 : 8 - CountHighBits(continuation);
+			p += 8;
+		}
+		while (p < to)
+		{
+			if (((uint8)text[p] & 0xC0) != 0x80)
+				count++;
+			p++;
+		}
+		return count;
+	}
+
 	/// The number of bytes of `mask` whose high bit is set (no other bits may be).
 	[Inline]
 	public static int CountHighBits(uint64 mask)

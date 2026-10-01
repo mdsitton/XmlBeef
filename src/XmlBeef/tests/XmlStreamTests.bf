@@ -162,7 +162,8 @@ static class XmlStreamTests
 			// An error located at its offset, or the unclosed element, located at its start tag
 			bool unclosed = random.Next(2) == 0;
 			input.Append(unclosed ? "<open>" : "&bad;");
-			for (int i < random.Next(20))
+			// Long enough that the buffer moves on past the element (its column is counted before)
+			for (int i < random.Next(60))
 				input.Append(pieces[random.Next(pieces.Count)]);
 			if (!unclosed)
 				input.Append("</r>");
