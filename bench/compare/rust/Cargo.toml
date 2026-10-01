@@ -5,7 +5,9 @@ edition = "2021"
 
 # Exact versions (the newest on 2026-09-30), locked with their dependencies in Cargo.lock
 [dependencies]
-quick-xml = "=0.42.0"
+quick-xml = { version = "=0.42.0", features = ["serialize"] }
+# For the typed benchmark (quick-xml's serde support)
+serde = { version = "=1.0.228", features = ["derive"] }
 roxmltree = "=0.21.1"
 xmlparser = "=0.13.6"
 # xml-rs: published as `xml` since 1.0 (the `xml-rs` 1.0.0 crate only re-exports it)

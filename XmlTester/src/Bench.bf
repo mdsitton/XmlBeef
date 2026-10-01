@@ -38,6 +38,14 @@ static class Bench
 					sink += doc.Root.ChildCount;
 					continue;
 				}
+				if (mode == "typed")
+				{
+					let model = new Osm();
+					XmlSerializer.Read(StringView((char8*)input.Ptr, input.Count), model, config).IgnoreError();
+					sink += model.nodes?.Count ?? 0;
+					delete model;
+					continue;
+				}
 				if (mode == "validate")
 				{
 					// The up-front UTF-8 and Char check alone
@@ -120,6 +128,23 @@ static class Bench
 				}), total);
 			if (sink == 0)
 				Console.WriteLine();
+		case "typed":
+			// One input (osm.xml) read into the Osm model of Osm.bf, freed after each read
+			let text = StringView((char8*)inputs[0].Ptr, inputs[0].Count);
+			let osm = scope Osm();
+			if (XmlSerializer.Read(text, osm) case .Err(let error))
+			{
+				Console.Error.WriteLine($"read error: {error}");
+				return 1;
+			}
+			Console.WriteLine(osm.AppendCheck(.. scope .()));
+			Console.Out.Flush();
+			PrintResult(Measure(minSamples, scope () =>
+				{
+					let model = new Osm();
+					XmlSerializer.Read(text, model).IgnoreError();
+					delete model;
+				}), total);
 		default:
 			Console.Error.WriteLine($"unknown bench mode {mode}");
 			return 2;

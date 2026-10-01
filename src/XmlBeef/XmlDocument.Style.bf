@@ -93,11 +93,7 @@ extension XmlDocument
 		if (mStyleBegun)
 			return;
 		mStyleBegun = true;
-		StringView text = reader.SourceText;
-		if (mInputStart != null && text.Ptr >= mInputStart && text.Ptr + text.Length <= mInputEnd)
-			mSource = text;
-		else
-			mSource = mStore.NewText(text);
+		KeepSource(reader);
 		mContentStart = (int32)reader.ContentStart;
 		mDeclarationStart = mContentStart;
 		mDeclarationEnd = mContentStart;

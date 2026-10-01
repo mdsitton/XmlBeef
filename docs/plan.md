@@ -438,8 +438,12 @@ keeps the source), and entity references stay references until what they produce
 `architecture.md` §4.* Sidecar slots of §4.9, preserving writer, mutation API;
 byte-exact round trips of every accepted suite input and every corpus SVG; edits keep neighbors.
 
-**Phase 6 — `[XmlObject]`.** The generator with §4.12's roles; a typed benchmark against quick-xml +
-serde, Go `encoding/xml` Unmarshal and .NET `XmlSerializer`.
+**Phase 6 — `[XmlObject]`.** *Done (2026-10-01): the generator with §4.12's roles plus token-list
+attributes, `[XmlText]`, wrapped lists, aliases, strict types, converters and allocators
+(`architecture.md` §6); `bench/compare/run-typed.sh` reads `osm.xml` into one model with XmlBeef,
+quick-xml + serde, Go and .NET, all checked; its timed run waits for a quiet machine with P3T.
+Dictionaries are left out (`status.md` T1).* The generator with §4.12's roles; a typed benchmark
+against quick-xml + serde, Go `encoding/xml` Unmarshal and .NET `XmlSerializer`.
 
 **Phase 7 — Collect-errors, then extras.** Collect-errors with recovery (required before the
 library is integrated; earlier if convenient). Then, as needed: `ReadSubtree`, namespace-off mode

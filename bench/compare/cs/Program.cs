@@ -45,6 +45,9 @@ var readerSettings = new XmlReaderSettings
 };
 var turboOptions = new XmlParserOptions { IgnoreDtd = true };
 
+if (lib == "xmlserializer")
+	return Typed.Run(docs[0], minSamples, total, Measure);
+
 var check = new Check();
 Action op;
 try

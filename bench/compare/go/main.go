@@ -240,6 +240,10 @@ func main() {
 		os.Exit(3)
 	}
 
+	if lib == "encoding/xml-unmarshal" {
+		typedRun(docs[0], minSamples, total)
+		return
+	}
 	var c check
 	var op func()
 	switch lib {

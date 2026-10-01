@@ -49,13 +49,13 @@ if want xerces; then
 		"$L/xerces/install/lib/libxerces-c.a"
 fi
 if want rust; then
-	step "rust (quick-xml, roxmltree, xmlparser, xml-rs, xmltree)"
+	step "rust (quick-xml, quick-xml + serde, roxmltree, xmlparser, xml-rs, xmltree)"
 	# Built from its directory so rustup picks the pinned toolchain in rust-toolchain.toml
 	(cd "$C/rust" && cargo build -q --release --locked --target-dir "$C/rust/target")
 	cp "$C/rust/target/release/xmlbench" "$B/rust-xmlbench"
 fi
 if want go; then
-	step "go (encoding/xml, etree, xmlquery)"
+	step "go (encoding/xml and its Unmarshal, etree, xmlquery)"
 	(cd "$C/go" && go build -mod=readonly -o "$B/go-xmlbench" .)
 fi
 if want java; then
@@ -71,7 +71,7 @@ if want java; then
 	chmod +x "$B/java/bin/xmlbench"
 fi
 if want cs; then
-	step "c# (TurboXml, XmlParser, System.Xml XmlReader/XmlDocument, XDocument)"
+	step "c# (TurboXml, XmlParser, System.Xml XmlReader/XmlDocument, XDocument, XmlSerializer)"
 	dotnet build -v q -nologo -c Release -o "$B/xmlbench-cs" "$C/cs/XmlBench.csproj" > /dev/null
 fi
 if want python; then

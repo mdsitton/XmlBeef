@@ -75,7 +75,15 @@ public enum XmlErrorKind : uint8
 
 	// File I/O
 	/// Reading the input failed.
-	IoError
+	IoError,
+
+	// Typed mapping ([XmlObject])
+	/// A required attribute, element or text is absent.
+	MissingValue,
+	/// A value that does not fit its field: not a number, out of range, no case of the enum.
+	InvalidValue,
+	/// In a strict type, an attribute, element or text no field maps.
+	UnexpectedContent
 }
 
 /// A read error with location information for precise error reporting.

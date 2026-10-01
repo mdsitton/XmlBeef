@@ -21,10 +21,12 @@
 use std::borrow::Cow;
 use std::time::Instant;
 
+mod typed;
+
 /// The rule shared by every harness in bench/compare (see ../run.sh): warm up for at least 1 s, then
 /// time single runs until at least `min_samples` were taken and at least 60% lie within ±10% of their
 /// median, or 10 s / 1000 samples have passed. Returns the median sample in ns.
-fn measure(min_samples: usize, mut op: impl FnMut()) -> (f64, usize, bool) {
+pub fn measure(min_samples: usize, mut op: impl FnMut()) -> (f64, usize, bool) {
     let warm = Instant::now();
     loop {
         op();
@@ -273,6 +275,10 @@ fn main() {
 
     let texts = &texts;
     let docs = &docs;
+    if lib == "quick-xml-serde" {
+        typed::run(&texts[0], min_samples, total);
+        return;
+    }
     let mut c = Check::default();
     let mut op: Box<dyn FnMut()> = match lib {
         "quick-xml" => {

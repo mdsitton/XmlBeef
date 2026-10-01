@@ -144,7 +144,11 @@ public class XmlDocument
 	/// whether the input started with a byte order mark, the landmarks outside the nodes, and the
 	/// nodes' and attributes' source pieces (by ID and index; empty otherwise).
 	internal bool mPreserve;
+	/// The source text, kept by reads with metadata from memory (KeepSource); positions are located in
+	/// it on demand, through the line starts (built on first use).
 	internal StringView mSource;
+	bool mSourceKept;
+	List<int32> mLineStarts ~ delete _;
 	internal bool mHasBom;
 	internal int32 mContentStart;
 	internal int32 mDeclarationStart;
@@ -185,6 +189,7 @@ public class XmlDocument
 		mNodeStyles = new .();
 		mAttributeStyles = new .();
 		mStyleEnds = new .();
+		mLineStarts = new .();
 		mGeneration = 1;
 		mNamespaces = true;
 		XmlNodeRecord document = default;
@@ -263,6 +268,8 @@ public class XmlDocument
 		mInputEnd = null;
 		mPreserve = false;
 		mSource = default;
+		mSourceKept = false;
+		mLineStarts.Clear();
 		mHasBom = false;
 		mContentStart = 0;
 		mDeclarationStart = 0;
@@ -529,9 +536,10 @@ public class XmlDocument
 					RecordRange(mNodeRanges, id, reader, reader.Offset, reader.EndOffset - reader.Offset);
 					for (int i < count)
 					{
-						reader.GetAttributeRange(i, let offset, let end);
-						if (end > 0)
-							RecordRange(mAttributeRanges, (int)element.mAttributeStart + i, reader, offset, end - offset);
+						// Name through closing quote; a defaulted attribute has none
+						XmlReaderCoreBase.AttributeRecord* source = &read[i];
+						if (source.mSpecified)
+							RecordRange(mAttributeRanges, (int)element.mAttributeStart + i, reader, source.mOffset, source.mEnd - source.mOffset);
 					}
 				}
 				LinkLastChild(current, id);
@@ -615,14 +623,85 @@ public class XmlDocument
 		}
 	}
 
-	/// Records a source range at `index` of `ranges` (growing it with "no position" records), its line
-	/// and column from the reader.
-	static void RecordRange(List<XmlRangeRecord> ranges, int index, XmlReader reader, int offset, int length)
+	/// Records a source range at `index` of `ranges` (growing it with "no position" records). From memory
+	/// input only the offsets are recorded (line -1): TryGetRange locates them in the kept source when
+	/// asked. A stream keeps no source, so its ranges are located as they are read.
+	void RecordRange(List<XmlRangeRecord> ranges, int index, XmlReader reader, int offset, int length)
 	{
-		while (ranges.Count <= index)
+		if (!mSourceKept)
+			KeepSource(reader);
+		XmlRangeRecord record;
+		if (!mSource.IsEmpty)
+			record = .() { mLine = -1, mColumn = 0, mOffset = (int32)offset, mLength = (int32)length };
+		else
+		{
+			reader.Locate(offset, let line, let column);
+			record = .() { mLine = (int32)line, mColumn = (int32)column, mOffset = (int32)offset, mLength = (int32)length };
+		}
+		// Usually the next one
+		while (ranges.Count < index)
 			ranges.Add(default);
-		reader.Locate(offset, let line, let column);
-		ranges[index] = .() { mLine = (int32)line, mColumn = (int32)column, mOffset = (int32)offset, mLength = (int32)length };
+		if (index == ranges.Count)
+			ranges.Add(record);
+		else
+			ranges[index] = record;
+	}
+
+	/// At the first event of a read with metadata: the source text the reader's offsets index, kept as
+	/// the document's copy of the input when it is that, else copied (a transcoded document); none from a
+	/// stream.
+	internal void KeepSource(XmlReader reader)
+	{
+		if (mSourceKept)
+			return;
+		mSourceKept = true;
+		StringView text = reader.SourceText;
+		if (text.IsEmpty)
+			mSource = default;
+		else if (mInputStart != null && text.Ptr >= mInputStart && text.Ptr + text.Length <= mInputEnd)
+			mSource = text;
+		else
+			mSource = mStore.NewText(text);
+	}
+
+	/// Line and column of `offset` in the kept source, through an index of line starts built on first use.
+	void LocateInSource(int offset, out int line, out int column)
+	{
+		if (mLineStarts.IsEmpty)
+		{
+			int i = XmlChar.StartsWithBom(mSource.Ptr, mSource.Length) ? 3 : 0;
+			mLineStarts.Add((int32)i);
+			while (i < mSource.Length)
+			{
+				int newline = XmlChar.NewlineLength(mSource.Ptr, i, mSource.Length);
+				if (newline > 0)
+				{
+					i += newline;
+					mLineStarts.Add((int32)i);
+				}
+				else
+					i++;
+			}
+		}
+		// The last line start at or before the offset
+		int low = 0;
+		int high = mLineStarts.Count - 1;
+		while (low < high)
+		{
+			int mid = (low + high + 1) / 2;
+			if (mLineStarts[mid] <= offset)
+				low = mid;
+			else
+				high = mid - 1;
+		}
+		line = low + 1;
+		column = 1;
+		int end = Math.Min(offset, mSource.Length);
+		for (int i = mLineStarts[low]; i < end; i++)
+		{
+			if (((uint8)mSource[i] & 0xC0) != 0x80)
+				column++;
+		}
 	}
 
 	/// Whether `input` starts with a UTF-8, UTF-16 or UTF-32 byte order mark.
@@ -638,8 +717,14 @@ public class XmlDocument
 	/// The recorded source range, if the document was read with positions and the item has one.
 	internal bool TryGetRange(List<XmlRangeRecord> ranges, int index, out XmlSourceRange range)
 	{
-		if (index < ranges.Count && ranges[index].mLine > 0)
+		if (index < ranges.Count && ranges[index].mLine != 0)
 		{
+			if (ranges[index].mLine < 0)
+			{
+				LocateInSource(ranges[index].mOffset, let line, let column);
+				ranges[index].mLine = (int32)line;
+				ranges[index].mColumn = (int32)column;
+			}
 			let r = ranges[index];
 			range = .(r.mLine, r.mColumn, r.mOffset, r.mLength, mSourceName);
 			return true;

@@ -173,6 +173,29 @@ internal class XmlNameTable
 		return interned;
 	}
 
+	/// @brief Find with the recent-name cache in front (the typed mapping's lookups of the names it maps).
+	/// @param text The string.
+	/// @return Its ID, or XmlNameId.None.
+	[Inline]
+	public XmlNameId FindCached(StringView text)
+	{
+		int length = text.Length;
+		if (length == 0)
+			return .None;
+		uint32 index = ((uint32)(uint8)text.Ptr[0] ^ ((uint32)(uint8)text.Ptr[length - 1] << 3) ^ ((uint32)length << 5)) & 0xFF;
+		uint32 id = mCache[index];
+		if (id != 0 && id < (uint32)mEntries.Count)
+		{
+			ref Entry entry = ref mEntries[id];
+			if (entry.mLength == length && XmlChar.EqualBytes(entry.mPtr, text.Ptr, length))
+				return .(id);
+		}
+		let found = Find(text);
+		if (found.IsValid)
+			mCache[index] = found.mValue;
+		return found;
+	}
+
 	/// @brief The ID of `text`, interning a copy of it if it is new.
 	/// @param text The string.
 	/// @return Its ID.

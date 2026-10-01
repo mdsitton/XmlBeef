@@ -9,8 +9,8 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 - An XML 1.0 (Fifth Edition) + Namespaces 1.0 library for Beef. Today it has a **pull reader**
   (`XmlReader`) over bytes in memory or a `Stream`, a **document** built on it (`XmlDocument` with
   `XmlNode` handles, lookups, optional source positions, mutation, a canonical writer and a
-  style-preserving one) and the W3C suite's **canonical form** (`XmlCanonical`). Typed mapping
-  follows (`plan.md` §6).
+  style-preserving one), compile-time **typed mapping** (`[XmlObject]`, `XmlSerializer`) and the W3C
+  suite's **canonical form** (`XmlCanonical`).
 - **Strict.** Every well-formedness and namespace constraint is checked; the first error stops the
   read with a located `XmlParseError` (kind, message, line, column in code points, byte offset,
   length, source name).
@@ -31,6 +31,10 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 | `XmlDocument.Mutation.bf` | Links, removal, namespace resolution after changes, the attribute table's moves, name/text checks, `WriteBytes`/`WriteFile` |
 | `XmlNode.Mutation.bf` | The public mutation API on `XmlNode` |
 | `XmlEncoder.bf` | UTF-8 text to the document's encoding, for `WriteBytes` |
+| `XmlObjectAttribute.bf` | `[XmlObject]` and the field attributes, `XmlNaming`, `IXmlSerializable`, `IXmlConverter<T>` |
+| `XmlSerializerCodeGen.bf` | The comptime generator of `[XmlObject]` (§6) |
+| `XmlBind.bf` | The generated code's runtime: `XmlValueRef`, `XmlValueWriter`, the cursors, `XmlBind` |
+| `XmlSerializer.bf` | One-call `Read`/`ReadFile`/`Write`/`WriteFile` of whole documents as `[XmlObject]` types |
 | `XmlNode.bf` | `XmlNodeId`, the `XmlNode` handle (kind, names, value, navigation), `XmlNodeList`, `XmlElementList`, `XmlAttribute`, `XmlAttributeList` |
 | `XmlNode.Lookup.bf` | `Find` (by name, by namespace and local name), attribute lookups and typed getters, `Text`/`AppendText`/`AppendInnerText`, `XmlDescendants`, `XmlValueParser` |
 | `XmlDocumentStore.bf` | Internal: the document's text (its copy of the input, decoded values) in an `XmlTextArena` |
@@ -55,7 +59,7 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 Tests are in `src/XmlBeef/tests/` (`XmlEdgeCaseTests`: spec-reference §16 one test each;
 `XmlReaderTests`: API, encodings, DTD modes, locations, security and limits; `XmlDocumentTests`:
 the tree, lookups and the writer; `XmlEncodingTests`, `XmlStreamTests`, `XmlPositionsTests`,
-`XmlFastPathTests`, `XmlPreserveTests`, `XmlMutationTests`). The CLI is `XmlTester/src/Program.bf`
+`XmlFastPathTests`, `XmlPreserveTests`, `XmlMutationTests`, `XmlObjectTests`). The CLI is `XmlTester/src/Program.bf`
 (with `Bench.bf` and `Mutate.bf`); the scripts are `test-roundtrip.sh` (PreserveStyle) and
 `test-xml-conformance.sh` (W3C suite in document, events, rewrite, stream and stream-events modes,
 with golden messages; catalogs read by `tests/xmlconf/manifest.py`), `test-svg-corpus.sh` (the SVG
@@ -279,8 +283,9 @@ EndElement); attributes span the name through the closing quote (`XmlReader.GetA
 other nodes span their markup. A node read from an entity's replacement text gets the range of the
 outermost reference. Offsets are in the UTF-8 text read (the transcoded text for other encodings),
 lines and columns in code points. `XmlNode.TryGetSourceRange` and `XmlAttribute.TryGetSourceRange`
-give an `XmlSourceRange` with the source name. Streams locate forward as the builder goes, so the
-ranges match memory input's exactly.
+give an `XmlSourceRange` with the source name. From memory the document keeps the source and records
+offsets only, computing line and column when asked (§6); streams locate forward as the builder goes,
+so the ranges match memory input's exactly.
 
 ### Mutation
 
@@ -355,3 +360,60 @@ with attributes sorted by name bytes, start-end pairs, the suite's escapes (`& <
 text and values, PIs as `<?target data?>`, and at the DOCTYPE its PIs and a `<!DOCTYPE root [ … ]>`
 block of the declared notations sorted by name (public identifiers normalized). It reproduces all 262
 OUTPUT files of the selection both ways.
+
+## 6. Typed mapping (`[XmlObject]`)
+
+KdlBeef's `[KdlObject]` design (`plan.md` §4.12) with XML's roles.
+
+- **Generation.** `[XmlObject]` is an `IComptimeTypeApply`: `XmlSerializerCodeGen.Emit` classifies
+  each public instance field at compile time and emits `XmlElementName`, `XmlElementNamespace`,
+  `XmlRead(XmlNode, allocator)` and `XmlWrite(XmlNode)` into the type, plus `IXmlSerializable`.
+  Emitted code is fully qualified, reaches fields through `this.` and uses `_`-prefixed locals; enums
+  are generated switches over their case names. `ScanChain` collects the chain's claimed names and
+  stops the build on conflicts, `PlanField` makes each field's plan (kinds, role, names; every check),
+  then the code is written from the plans, so nothing is emitted for a type whose mapping fails. A
+  base's methods are hidden (`new`) and called first.
+- **Roles.** Scalars (bool, integers, floats, String, enums, converter types) are attributes;
+  `[XmlElement]` makes one a child element's text, `[XmlText]` the element's own text (its Text and
+  CDATA children; other children stay when it is written). `[XmlAttribute] List<scalar>` is one
+  attribute of space-separated tokens (`class`, `points`). `List<scalar>` is repeated child elements
+  named after the field; `[XmlObject]` fields are child elements named after the field;
+  `List<[XmlObject]>` repeated children named after the item type; `[XmlArray]` puts a list in a
+  wrapper (`Item` names a scalar list's items, `item` by default). `[XmlChildren] List<T>` takes every
+  child element no other field claims, dispatched by local name to the concrete `[XmlObject]` types
+  assignable to T (found through `Type.TypeDeclarations` when the method is compiled, so they may
+  derive from the type being generated) and written through the interface so each item's own type
+  decides. Dictionaries are not supported: XML has no one shape for them.
+- **Names and namespaces.** Names are as declared by default (`plan.md` §9 item 10), with
+  `CamelCase`, `KebabCase`, `SnakeCase` and `Lower` policies per type, `[XmlName]` per field and
+  `[XmlAlias]` for older names (read; renamed when written). A type's `Namespace` applies to its
+  element and its fields' child elements; attributes are in no namespace unless `[XmlName(…,
+  Namespace = …)]` gives one. Reading matches local names; an element name without a namespace
+  matches any namespace (SVG elements read without declaring theirs), an attribute name without one
+  matches only unprefixed attributes; a document read without namespaces matches whole names.
+  Writing a name in a namespace uses a prefix bound in scope, or declares one (`xmlns` on a new
+  element, `xmlns:ns0` for an attribute).
+- **Runtime (`XmlBind`).** `Find*` locate a value as an `XmlValueRef` (element, attribute position,
+  name, text); the first matching element wins. Names compare as interned IDs on the records, looked
+  up once per call through the name table's recent-name cache (`FindCached`). `To*` convert with
+  XML Schema's lexical forms (`XmlValueParser`: whitespace around numbers allowed, `INF`, `NaN`,
+  `true`/`1`), range-checked; errors are `element: name: message`, located at the attribute or
+  element (`XmlSerializer` raises the metadata mode to Positions). Writing goes through
+  `XmlValueWriter` and changes nothing when the value is the same, so a PreserveStyle document stays
+  byte-identical where the object did not change. Lists write in one pass (`XmlChildCursor`,
+  `XmlFreeChildCursor`: existing elements reused by position, new ones inserted after the last with
+  a copy of its indentation, leftovers removed with theirs).
+- **Strict types** (`Strict = true`) reject, located, an attribute, child element or non-whitespace
+  text no field in the chain maps (namespace declarations and `xml:` attributes allowed); the
+  claimed names are virtual properties on classes, so a base's check sees its subclasses' fields.
+- **Converters** (`IXmlConverter<T>`, `[XmlConverter(typeof(T))]`, `[XmlUseConverter]`) read an
+  `XmlValueRef` and write text (or nothing, which removes the value).
+- **Ownership** as KdlBeef: a null String, object or List field gets a new instance on read (from the
+  allocator when one is given); replaced List items are deleted without an allocator.
+- **Positions are lazy for memory input.** A read with positions from memory keeps the source and
+  records offsets only; line and column are computed when asked (`TryGetSourceRange`, an error),
+  through an index of line starts built on first use. Streams keep no source, so theirs are located
+  as they are read. This halved the cost of `XmlSerializer` reads.
+- **Benchmark.** `bench/compare/run-typed.sh` reads `osm.xml` into the same OpenStreetMap model with
+  XmlBeef, quick-xml + serde, Go's `encoding/xml` Unmarshal and .NET's `XmlSerializer`, each checked
+  against a reference computed by Python's ElementTree.
