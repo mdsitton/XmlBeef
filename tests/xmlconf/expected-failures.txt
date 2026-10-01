@@ -1,0 +1,3 @@
+# Known XmlBeef failures in the W3C suite (ID<TAB>reason); see test-xml-conformance.sh. A listed case
+# that starts passing fails the run.
+hst-lhs-007	UTF-8 BOM with encoding="iso-8859-1": the BOM wins, as in most parsers (plan.md §9 item 6; libxml2, expat, .NET, the JDK accept it)

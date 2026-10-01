@@ -34,7 +34,15 @@ with it:
 | `bench/compare/` | The comparison benchmark (§2, §8): pinned clones, a harness per language, inputs, `run.sh` with the siblings' measurement rule and `ONLY=` partial reruns |
 | `docs/` | This plan, the spec reference, the implementation survey, the test-suite reference, `status.md` |
 
-Nothing parses XML yet.
+Nothing parsed XML when this plan was written.
+
+**Update (phase 1 done, 2026-09-30):** `XmlReader` (generic core over a cursor, entity input frames,
+namespaces, the internal subset), the encoding detector, `XmlCanonical.WriteSuiteForm`, `XmlTester`,
+`test-xml-conformance.sh` (catalogs read by `tests/xmlconf/manifest.py`) and `test-leaks.sh` exist;
+the placeholder `XmlVersion` and the smoke test are gone. What was built and why is in
+`architecture.md`, the baseline in `status.md`. Beyond the phase: UTF-32, ISO-8859-1 and US-ASCII are
+read already (only UTF-8/16 were asked), and namespace-off mode exists, so the nine NAMESPACE="no"
+cases run instead of being skipped.
 
 ## 2. What the research says
 
@@ -384,7 +392,10 @@ siblings.
 Each phase ends with Debug and Release tests, the leak check, the suite scripts on both binaries and
 the Windows tests (`AGENTS.md`), committed.
 
-**Phase 1 — Reader core and conformance runner.** Port the cursor, UTF-8 validation and char
+**Phase 1 — Reader core and conformance runner.** *Done (2026-09-30): 957/957 accepted, 950/951
+rejected (`hst-lhs-007` is the listed deviation of §9 item 6), 262/262 canonical outputs byte for
+byte, in Debug and Release; DTD processing instructions are reported as events (the canonical outputs
+keep them), and the internal subset is a resumable reader state.* Port the cursor, UTF-8 validation and char
 tables; encoding detection with UTF-8/UTF-16; the tokenizer and well-formedness state machine
 (elements, attributes, text, CDATA, comments, PIs, XML declaration, DOCTYPE with the internal subset,
 entities, namespaces); `XmlReader` events; `XmlTester` prints the suite's canonical form from events;

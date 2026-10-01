@@ -1,0 +1,3 @@
+# W3C suite cases skipped deliberately (ID<TAB>reason); see test-xml-conformance.sh and
+# docs/test-suites.md §6.1. Empty: no case in the selection is wrong for this processor profile, and
+# the NAMESPACE="no" cases run with namespaces off.
