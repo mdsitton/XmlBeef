@@ -81,9 +81,9 @@ inputs of 10–15 MB:
 Every harness reports a checksum (elements, attributes, attribute-value and text lengths after
 decoding) checked against libxml2's; a wrong one is FAIL.
 
-**No timed run exists yet**: the machine stayed loaded (load average 5–10) for the whole session, so
-only a one-sample smoke table was taken (`bench/compare/results-smoke.md`, labeled unreliable). Its
-rough picture:
+Before XmlBeef existed, a one-sample smoke table under load (`bench/compare/results-smoke.md`) gave
+the picture below; the timed run with XmlBeef is at the end of this section. The smoke table's rough
+picture:
 
 - Document builders: pugixml leads at ~390–2,300 MB/s, then roxmltree 170–725, the JDK DOM, libxml2
   and lxml 50–330.
@@ -109,7 +109,14 @@ on an M1.
 So the fast libraries that read real SVG correctly are roxmltree, expat and libxml2; pugixml is the
 speed bar for a DOM but not a correct one. **The target for XmlBeef: roxmltree-or-better document
 speed and quick-xml-class reader speed, while passing every input here and the whole W3C suite.**
-Set the numeric targets from the timed run (§8).
+
+**The timed run** (2026-10-02, `bench/compare/results.md`, charts in `docs/benchmark.svg`; load 7–12,
+every cell rerun until 3 processes agreed within 5%, 3 of 304 cells did not): the XmlBeef document is
+1.65–2.7× roxmltree on every input roxmltree reads, 3–8× libxml2's tree, and 41–98% of pugixml (which
+fails svg-generated), ahead of it on book-utf16; the XmlBeef reader is 1.4–2.7× quick-xml, 1.15–1.9×
+xmlparser (a tokenizer) and 3–7× expat and libxml2's reader, the fastest reader on every input. **The
+numeric targets**, kept as regression guards: the document at least 1.5× roxmltree and the reader at
+least 1.3× quick-xml on every input both read, with every input passing.
 
 ### 2.3 The test suite
 
@@ -409,12 +416,10 @@ name table; DOCTYPE processing instructions are the DOCTYPE node's children.* St
 over reader events, canonical writer, lookups; `XmlTester` reads through the document (events kept as
 a second mode, both checked by the script); `test-svg-corpus.sh` over the 2,389 SVGs.
 
-**Phase 3 — Speed.** *Code done, timed run pending (2026-09-30): `XmlTester -bench` joins
-`bench/compare/run.sh` (`XmlBeef`, `XmlBeef reader`; check lines equal libxml2's on all eight inputs)
-and the fast paths of `architecture.md` §3 cut instructions per byte by 30–75% (`status.md`). The
-machine never dropped below load average 2, so no timed figure exists; orientation runs under load
-put both columns past the working targets. Run the timed benchmark (status.md P3T) before calling the
-phase done.* Join `bench/compare` (a `beef` harness and `XmlTester -bench`), profile, fast
+**Phase 3 — Speed.** *Done (2026-10-02): `XmlTester -bench` joins `bench/compare/run.sh`
+(`XmlBeef`, `XmlBeef reader`; check lines equal libxml2's on all eight inputs), the fast paths of
+`architecture.md` §3 cut instructions per byte by 30–75% (`status.md`), and the timed run puts both
+columns past the targets (§2.2).* Join `bench/compare` (a `beef` harness and `XmlTester -bench`), profile, fast
 paths. Numeric targets come from the timed run (§2.2); the working targets: the event reader in
 quick-xml's class, the document at or above roxmltree (the fastest correct DOM), several times
 libxml2 and expat, all while passing every benchmark input and the W3C suite (pugixml is faster but
@@ -473,7 +478,7 @@ tests/fetch-suites.sh                    # W3C XML suite, SVG corpora
 cd bench/compare
 ./fetch.sh && ./build.sh                 # pinned clones and toolchains; every harness into bin/
 ./gen-inputs.py                          # inputs/
-./run.sh > results.md && ./plot.py      # 2–3 h; refuses to run above load average 2 (FORCE=1 overrides)
+./run.sh > results.md && ./plot.py      # 2–3 h at any load: cells rerun until 3 runs agree within 5%
 ONLY='XmlBeef.*' ./run.sh                # later: remeasure only XmlBeef, merged into results.md
 ```
 

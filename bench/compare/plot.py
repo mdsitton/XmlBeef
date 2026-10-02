@@ -129,7 +129,8 @@ def read_results():
             for p, v in zip(members, cells[1:]):
                 if v in ("n/a", "?"):
                     continue
-                row[p] = float(v) if re.match(r"^[0-9.]+$", v) else None
+                # A trailing ~ marks a cell whose runs did not settle (measure.sh): still its median
+                row[p] = float(v.rstrip("~")) if re.match(r"^[0-9.]+~?$", v) else None
                 if v == "DNF":
                     timeouts[(name, p)] = input_size(name) / 1048576.0 / LIMIT
     return libraries[0], libraries[1], table, timeouts
@@ -347,7 +348,7 @@ def table_panel(builders, readers, table, timeouts, bases, top):
             y += row_h
         out.append(f'<line x1="40" y1="{y:.1f}" x2="{width - 40}" y2="{y:.1f}" class="rule"/>')
     y += 22
-    out.append(text(40, y, f"Median of 3 processes · FAIL = rejected, crashed or a wrong check · DNF = over {LIMIT:.0f} s · "
+    out.append(text(40, y, f"Median of 3-9 processes, until 3 agree within 5% · FAIL = rejected, crashed or a wrong check · DNF = over {LIMIT:.0f} s · "
                     "n/a = no UTF-16 support · * see the notes in results.md", "footnote"))
     return out, y + 8, width
 

@@ -17,15 +17,16 @@ Last reviewed: 2026-10-01 (after the code review's fixes).
 | `./test-codegen.sh` | 19/19 `[XmlObject]` fixtures (`tests/codegen/src/Fixtures.bf`), each built alone: 17 mappings the generator must reject stop the build with their message (roles, collisions by name, alias, inheritance and overlapping namespaces, invalid names, catch-alls, dictionaries, converters), 2 positive controls build |
 | `beefbuild-win -test`, `beefbuild-win -test -config=TestRelease` (`~/development/beef-proton`) | 256/256 pass |
 | `tests/fetch-suites.sh` | W3C XML Conformance Test Suite 20130923 (2,585 cases), W3C SVG 1.1 Second Edition suite (606 SVGs), resvg test SVGs (1,784), each verified by SHA-256 or commit |
-| `bench/compare/run.sh` (XmlBeef's columns: `beefbuild -config=Release` first) | The existing implementations and `XmlBeef` / `XmlBeef reader`, whose check lines match libxml2's on all eight inputs; results in `bench/compare/results.md`, which does not exist yet: run.sh refuses to run above load average 2, and the machine has not been under it (P3T) |
-| `bench/compare/run-typed.sh` (`./build.sh rust go cs`, `beefbuild -config=Release`) | XmlBeef `[XmlObject]`, quick-xml + serde, Go encoding/xml Unmarshal and .NET XmlSerializer read `osm.xml` into the same model; all four check lines equal the ElementTree reference. No timed table yet (P3T); a smoke run under load (8.65, not comparable) had XmlBeef 129 MB/s, quick-xml + serde 91, XmlSerializer 64, encoding/xml 24 |
+| `bench/compare/run.sh` (XmlBeef's columns: `beefbuild -config=Release` first) | The existing implementations and `XmlBeef` / `XmlBeef reader`, whose check lines match libxml2's on all eight inputs; results in `bench/compare/results.md` (2026-10-02, load 7–12; each cell rerun in fresh processes until 3 agree within 5%, `bench/compare/measure.sh`; 3 of 304 cells did not, marked `~`) and `docs/benchmark.svg`: the document 1.65–2.7× roxmltree, the reader 1.4–2.7× quick-xml and the fastest reader on every input; the targets (`plan.md` §2.2) are met |
+| `bench/compare/run-typed.sh` (`./build.sh rust go cs`, `beefbuild -config=Release`) | XmlBeef `[XmlObject]`, quick-xml + serde, Go encoding/xml Unmarshal and .NET XmlSerializer read `osm.xml` into the same model; all four check lines equal the ElementTree reference. `bench/compare/typed-results.md` (2026-10-02, load 13 falling to 10, every cell settled): XmlBeef 139.7 MB/s, quick-xml + serde 90.4, XmlSerializer 69.0, encoding/xml 23.2 |
 | `bench/instructions.sh` (after `beefbuild -config=Release`) | The instruction counts below |
 
 Any change to `.bf` files must keep these green in both Debug and Release.
 
 ## Performance baseline
 
-No timed figures yet (P3T). The load-independent measure, user-space instructions per input byte
+Timed figures: `bench/compare/results.md` and `typed-results.md` (above). The load-independent
+measure, user-space instructions per input byte
 (`bench/instructions.sh`), before and after the phase 3 fast paths, after phase 5, before the
 review's P02 (2026-10-01, after its R fixes) and now; the stream rows read the same inputs as a
 `Stream` through the default 64 KiB buffer and a 4 KiB one:
@@ -62,9 +63,8 @@ costs the normal path 0.5–1.5% more (a check per start tag, and code size movi
 inlining; measured against the commit before it).
 
 IPC on records' event pass is about 2.7 with few branch misses, so instructions track time closely
-there. Orientation runs under load (not comparable, not recorded in results.md) put the event pass
-ahead of quick-xml and the document ahead of roxmltree on every input; the timed run has to confirm
-it.
+there. The timed run confirms what orientation runs had suggested: the event pass ahead of quick-xml
+and the document ahead of roxmltree on every input.
 
 ## Feature status
 
@@ -79,7 +79,7 @@ it.
 | Mutation | Done (phase 5): add, insert, move, remove, rename, set values, text and attributes, with namespaces resolved again. See `architecture.md` §4 |
 | Suite canonical form (`XmlCanonical.WriteSuiteForm`) | Done, from a reader or a document |
 | Scripts | `test-xml-conformance.sh` (document, events, rewrite, stream, stream-events, collect, stream-collect; golden messages), `test-svg-corpus.sh`, `test-roundtrip.sh`, `test-collect.sh`, `test-codegen.sh`, `test-leaks.sh`, `bench/instructions.sh` |
-| Speed (phase 3) | Fast paths done (`architecture.md` §3 "Fast paths"), `XmlTester -bench`/`-bench-loop`, XmlBeef in `bench/compare/run.sh`; the timed run is pending (P3T) |
+| Speed (phase 3) | Fast paths done (`architecture.md` §3 "Fast paths"), `XmlTester -bench`/`-bench-loop`, XmlBeef in `bench/compare/run.sh`; timed run done, targets met (`plan.md` §2.2) |
 | Typed mapping (`[XmlObject]`, `XmlSerializer`) | Done (phase 6): attributes, element text, own text, token-list attributes, repeated and wrapped lists of scalars and objects, child objects, `[XmlChildren]` dispatch, dictionaries in five shapes (`[XmlMap]`), namespaces, naming policies, aliases, required, strict types, converters, allocators, in-place writes that keep a PreserveStyle document. See `architecture.md` §6 |
 | Collect-errors (`XmlReadConfig.CollectErrors`) | Done (phase 7): every error reported and the read goes on; the document keeps what it read and lists the errors (`Errors`). See `architecture.md` §3 |
 | `ReadSubtree`, streaming writer, resolver | Planned "as needed": `plan.md` §6 phase 7 |
@@ -95,8 +95,6 @@ remains of them is below (RV-); the follow-up SP1 (no per-start-tag position wor
 
 | ID | Item | Size |
 |----|------|------|
-| P3T | The timed benchmark: `cd bench/compare && ./run.sh > results.md && ./plot.py` (2–3 h) on a quiet machine (load average under 2; it was 6–19 all session), then set phase 3's numeric targets from it (`plan.md` §2.2) and check them | M |
 | P7 | Phase 7's extras, as needed: `ReadSubtree`, the streaming writer, the external-entity resolver (`plan.md` §6) | M |
-| P6T | The typed benchmark's timed run: `cd bench/compare && ./run-typed.sh` on a quiet machine, with P3T | S |
 | RV-L | Known limits kept: a CR in a comment or PI data reads back as LF (no escape exists); removing a specified attribute that has a DTD default lets the default return on reading; references to unread entities stay as written after the DOCTYPE is removed (`architecture.md` §4 "Edit dependencies") | S |
 | RV-A1 | Review A01 beyond the frame window: typed document offsets versus window offsets (today both are `int`, converted by `DocOffset`/`DocEnd`) would be a wide change to the core for a small gain; not done | S |

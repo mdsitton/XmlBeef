@@ -8,8 +8,10 @@
 #   2. Sample: time single operations until at least N samples (default 5) were taken and at least
 #      60% of them lie within ±10% of their median ("converged"), or 10 s of measuring or 1000
 #      samples have passed ("capped"). Report the median sample.
-#   3. Repeat: run each cell REPEATS times (default 3) in fresh processes and take the median, since
-#      memory layout, hash seeds and CPU clocks differ between processes.
+#   3. Repeat: run each cell in fresh processes, since memory layout, hash seeds, CPU clocks and the
+#      machine's load differ between them, until the runs settle (measure.sh: at least REPEATS = 3,
+#      then on until 3 lie within ±TOLERANCE = 5% of their median, at most MAX_REPEATS = 9), and take
+#      the median. A cell that never settled is marked `~`.
 # One operation parses the input once: a file, or for svg-icons and svg-artwork every file of the
 # directory (all read into memory first). Every harness first prints "check: E A V T" (elements;
 # attributes without namespace declarations; attribute value and text lengths in code points after
@@ -25,23 +27,19 @@
 # A full run prints the tables (save them as results.md and run plot.py to redraw the charts). With
 # ONLY (merge.sh), for example ONLY='expat|pugixml.*' ./run.sh, only the matching implementations are
 # measured and results.md is updated in place; inputs not named keep their saved rows.
-# Benchmarks need a quiet machine: run.sh refuses to start when the 1-minute load average is above 2
-# (FORCE=1 runs anyway, for smoke tests; such figures are not comparable).
+# No quiet machine is assumed: repeated runs absorb the noise (step 3), and the load averages at the
+# start and the end are printed with the tables.
 set -uo pipefail
 C="$(cd "$(dirname "$0")" && pwd)"
 B="$C/bin"
 PY="$C/python/.venv/bin/python"
 source "$C/merge.sh"
+source "$C/measure.sh"
 
-load=$(cut -d' ' -f1 /proc/loadavg)
-if [ -z "${FORCE:-}" ] && [ -z "${MERGE_CHILD:-}" ] && awk -v l="$load" 'BEGIN { exit !(l > 2) }'; then
-	echo "Load average is $load: close other work and rerun (or FORCE=1 to measure anyway)" >&2
-	exit 1
-fi
+load_start=$(cut -d' ' -f1 /proc/loadavg)
 merge_into "$C/results.md" "$@"
 N="${1:-5}"
 shift || true
-REPEATS="${REPEATS:-3}"
 LIMIT="${LIMIT:-60}"
 # Virtual memory limit (KiB) for the Beef libraries' cells: Xml-Beef grows without bound on long tags
 BEEF_MEMORY="${BEEF_MEMORY:-4000000}"
@@ -118,24 +116,26 @@ check_ok() { # reference-line harness-output
 		exit 0 }'
 }
 
-# One cell: the median MB/s over REPEATS runs, or FAIL / DNF / n/a
-cell() { # reference-line path command...
-	local ref="$1" path="$2" values=() out status
+# One run of a cell in a fresh process: its MB/s, or FAIL / DNF / n/a
+run_once() { # reference-line path command...
+	local ref="$1" path="$2" out status
 	shift 2
-	for ((r = 0; r < REPEATS; r++)); do
-		# Both streams: the Zig harnesses print their results to stderr
-		if [[ "$1" == "$B/beef-xmlbench" ]]; then
-			out=$(ulimit -v "$BEEF_MEMORY"; timeout "$LIMIT" "$@" "$path" "$N" 2>&1)
-		else
-			out=$(timeout "$LIMIT" "$@" "$path" "$N" 2>&1)
-		fi
-		status=$?
-		if [ $status -eq 124 ]; then echo DNF; return; fi
-		if [ $status -eq 3 ]; then echo "n/a"; return; fi
-		if [ $status -ne 0 ] || ! check_ok "$ref" "$out"; then echo FAIL; return; fi
-		values+=("$(grep -oE '[0-9.]+ MB/s' <<< "$out" | head -1 | awk '{print $1}')")
-	done
-	printf '%s\n' "${values[@]}" | sort -g | awk '{a[NR] = $1} END {print (NR % 2) ? a[(NR + 1) / 2] : (a[NR / 2] + a[NR / 2 + 1]) / 2}'
+	# Both streams: the Zig harnesses print their results to stderr
+	if [[ "$1" == "$B/beef-xmlbench" ]]; then
+		out=$(ulimit -v "$BEEF_MEMORY"; timeout "$LIMIT" "$@" "$path" "$N" 2>&1)
+	else
+		out=$(timeout "$LIMIT" "$@" "$path" "$N" 2>&1)
+	fi
+	status=$?
+	if [ $status -eq 124 ]; then echo DNF; return; fi
+	if [ $status -eq 3 ]; then echo "n/a"; return; fi
+	if [ $status -ne 0 ] || ! check_ok "$ref" "$out"; then echo FAIL; return; fi
+	grep -oE '[0-9.]+ MB/s' <<< "$out" | head -1 | awk '{print $1}'
+}
+
+# One cell: the median MB/s of runs repeated until they settle (measure.sh), or FAIL / DNF / n/a
+cell() { # reference-line path command...
+	settle run_once "$@"
 }
 
 # The reference check line of every input: libxml2's tree
@@ -249,16 +249,19 @@ cpu=$(grep -m1 'model name' /proc/cpuinfo | sed 's/.*: //')
 if [ -n "${ONLY:-}" ]; then
 	saved_preamble
 	echo
-	echo "Partial rerun on $(date +%F) (ONLY='$ONLY', inputs: $(echo $requested); load average $load at the start; N=$N, REPEATS=$REPEATS, LIMIT=$LIMIT s)."
+	echo "Partial rerun on $(date +%F) (ONLY='$ONLY', inputs: $(echo $requested); load average $load_start at the start; N=$N, REPEATS=$REPEATS-$MAX_REPEATS, TOLERANCE=$TOLERANCE%, LIMIT=$LIMIT s)."
 else
 	echo "# XML implementations compared"
 	echo
-	echo "Produced by run.sh on $(date +%F) ($cpu, Linux x86-64, single thread; load average $load at the start;"
-	echo "N=$N samples minimum, REPEATS=$REPEATS processes per cell, LIMIT=$LIMIT s). Pinned versions in fetch.sh and"
-	echo "the harness manifests; inputs from gen-inputs.py. MB/s of input, higher is better. FAIL = parse error,"
-	echo "crash or a check line that differs from libxml2's; DNF = past the time limit; n/a = no UTF-16 support."
+	echo "Produced by run.sh on $(date +%F) ($cpu, Linux x86-64, single thread; load average $load_start at the start;"
+	echo "N=$N samples minimum per process; $REPEATS to $MAX_REPEATS processes per cell, until $REPEATS agree within ±$TOLERANCE%; LIMIT=$LIMIT s)."
+	echo "Pinned versions in fetch.sh and the harness manifests; inputs from gen-inputs.py. MB/s of input, higher is"
+	echo "better. FAIL = parse error, crash or a check line that differs from libxml2's; DNF = past the time limit;"
+	echo "n/a = no UTF-16 support; ~ = its runs did not agree within the tolerance (noisy: compare with care)."
 fi
 echo
 table "Document builders (DOM and other trees)" "${BUILDERS[@]}"
 table "Pull, event and SAX readers" "${READERS[@]}"
 notes
+echo
+echo "Load average at the end: $(cut -d' ' -f1 /proc/loadavg)."

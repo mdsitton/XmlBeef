@@ -5,28 +5,24 @@
 # (rust/src/typed.rs), Go's encoding/xml Unmarshal (go/typed.go) and .NET's XmlSerializer
 # (cs/Typed.cs). Prints a Markdown table of MB/s of input (higher is better).
 #
-# The measurement rule is run.sh's (warm-up, converged median of samples, REPEATS fresh processes, a
-# LIMIT in seconds, DNF past it). Every harness first prints `check: N W R T D M S U P` (nodes, ways,
+# The measurement rule is run.sh's (warm-up, converged median of samples, fresh processes repeated
+# until they settle as measure.sh describes, a LIMIT in seconds, DNF past it). Every harness first prints `check: N W R T D M S U P` (nodes, ways,
 # relations, tags, node references, members, the sum of node ids and references, the UTF-8 bytes of
 # the user names, the coordinates' sum in 1e-7 degrees), compared with one computed here by Python's
 # ElementTree: FAIL if it differs.
 #
 # Setup: ./fetch.sh && ./build.sh rust go cs && ./gen-inputs.py; beefbuild -config=Release at the
 # repository root for XmlBeef.
-# Usage: run-typed.sh [min-samples]      (FORCE=1 to measure on a loaded machine; not comparable)
+# Usage: run-typed.sh [min-samples]
 set -uo pipefail
 C="$(cd "$(dirname "$0")" && pwd)"
 B="$C/bin"
 XT="$C/../../build/Release_Linux64/XmlTester/XmlTester"
 INPUT="$C/inputs/osm.xml"
+source "$C/measure.sh"
 
 load=$(cut -d' ' -f1 /proc/loadavg)
-if [ -z "${FORCE:-}" ] && awk -v l="$load" 'BEGIN { exit !(l > 2) }'; then
-	echo "Load average is $load: close other work and rerun (or FORCE=1 to measure anyway)" >&2
-	exit 1
-fi
 N="${1:-5}"
-REPEATS="${REPEATS:-3}"
 LIMIT="${LIMIT:-60}"
 
 IMPLEMENTATIONS=(
@@ -52,17 +48,19 @@ print('check:', len(nodes), len(ways), len(relations), tags, len(nds), len(membe
 EOF
 )
 
-# One cell: the median MB/s over REPEATS runs, or FAIL / DNF
+# One run in a fresh process: its MB/s, or FAIL / DNF
+run_once() { # command...
+	local out status
+	out=$(timeout "$LIMIT" "$@" "$INPUT" "$N" 2>&1)
+	status=$?
+	if [ $status -eq 124 ]; then echo DNF; return; fi
+	if [ $status -ne 0 ] || [ "$(grep -m1 '^check:' <<< "$out")" != "$reference" ]; then echo FAIL; return; fi
+	grep -oE '[0-9.]+ MB/s' <<< "$out" | head -1 | awk '{print $1}'
+}
+
+# One cell: the median MB/s of runs repeated until they settle (measure.sh), or FAIL / DNF
 cell() { # command...
-	local values=() out status
-	for ((r = 0; r < REPEATS; r++)); do
-		out=$(timeout "$LIMIT" "$@" "$INPUT" "$N" 2>&1)
-		status=$?
-		if [ $status -eq 124 ]; then echo DNF; return; fi
-		if [ $status -ne 0 ] || [ "$(grep -m1 '^check:' <<< "$out")" != "$reference" ]; then echo FAIL; return; fi
-		values+=("$(grep -oE '[0-9.]+ MB/s' <<< "$out" | head -1 | awk '{print $1}')")
-	done
-	printf '%s\n' "${values[@]}" | sort -g | awk '{a[NR] = $1} END {print (NR % 2) ? a[(NR + 1) / 2] : (a[NR / 2] + a[NR / 2 + 1]) / 2}'
+	settle run_once "$@"
 }
 
 header="| input |"
@@ -81,4 +79,4 @@ echo "$header"
 echo "$rule"
 echo "$line"
 echo
-echo "Load average at the start: $load. Reference: $reference"
+echo "Load average $load at the start, $(cut -d' ' -f1 /proc/loadavg) at the end; $REPEATS to $MAX_REPEATS processes per cell, until $REPEATS agree within ±$TOLERANCE% (~: they did not). Reference: $reference"

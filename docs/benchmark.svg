@@ -1,0 +1,304 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="2306" viewBox="0 0 920 2306" role="img" aria-label="XML parsing throughput of existing implementations">
+
+  <style>
+    svg { font-family: system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; }
+    .bg { fill: #ffffff; }
+    .title { font-size: 19px; font-weight: 650; fill: #1f2328; }
+    .subtitle, .footer, .axis { font-size: 12.5px; fill: #656d76; }
+    .group { font-size: 11px; font-weight: 650; letter-spacing: 0.08em; fill: #656d76; }
+    .label { font-size: 13.5px; fill: #1f2328; }
+    .lang { font-size: 11px; fill: #8c959f; }
+    .ours { font-weight: 700; }
+    .value { font-size: 12.5px; fill: #424a53; font-variant-numeric: tabular-nums; }
+    .value.ours { fill: #c2410c; }
+    .small { font-size: 12px; fill: #424a53; }
+    .note-plain { fill: #8c959f; }
+    .footnote { font-size: 12px; fill: #656d76; }
+    .repo { font-size: 11.5px; fill: #8c959f; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .bar { fill: #afb8c1; }
+    .bar-ours { fill: #ea580c; }
+    .rule { stroke: #d8dee4; stroke-width: 1; }
+    .libname { fill: #656d76; }
+    .libname.ours { fill: #c2410c; font-weight: 650; }
+    .colhead { font-size: 11px; font-weight: 600; fill: #424a53; }
+    .cell { font-size: 12px; fill: #424a53; font-variant-numeric: tabular-nums; }
+    .cell.best { font-weight: 700; fill: #1f2328; }
+    .cell.ours { fill: #c2410c; }
+    .cell-missing { font-size: 10px; fill: #8c959f; }
+    .heat { fill: #2da44e; }
+    .row-ours { fill: #ea580c; fill-opacity: 0.07; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .title, .label { fill: #e6edf3; }
+      .subtitle, .footer, .axis, .group { fill: #8d96a0; }
+      .lang, .note-plain { fill: #6e7681; }
+      .footnote { fill: #8d96a0; }
+      .repo { fill: #6e7681; }
+      .value, .small { fill: #c9d1d9; }
+      .value.ours { fill: #fb923c; }
+      .bar { fill: #3d444d; }
+      .bar-ours { fill: #f97316; }
+      .rule { stroke: #262c36; }
+      .libname { fill: #8d96a0; }
+      .libname.ours { fill: #fb923c; }
+      .colhead { fill: #c9d1d9; }
+      .cell { fill: #c9d1d9; }
+      .cell.best { fill: #f0f6fc; }
+      .cell.ours { fill: #fb923c; }
+      .cell-missing { fill: #6e7681; }
+      .heat { fill: #3fb950; }
+      .row-ours { fill: #f97316; fill-opacity: 0.10; }
+    }
+  </style>
+<rect class="bg" x="0" y="0" width="920" height="2306" rx="10"/>
+<text x="40.0" y="44.0" class="title" text-anchor="start">XML parsing: average speed relative to XmlBeef</text>
+<text x="40.0" y="66.0" class="subtitle" text-anchor="start">geometric mean over the inputs both handled of each library's MB/s ÷ XmlBeef's · higher is better</text>
+<text x="40.0" y="106.0" class="group" text-anchor="start">BUILDS A DOCUMENT</text>
+<text x="40.0" y="131.5" class="lang" text-anchor="start">C++</text>
+<text x="90" y="131.5"><tspan class="label">pugixml*</tspan><tspan class="repo" dx="8">zeux/pugixml</tspan></text>
+<rect x="440" y="118.5" width="240.0" height="16" rx="3" class="bar"/>
+<text x="688.0" y="131.5" class="small"><tspan class="value">1.25×</tspan><tspan class="note-plain" dx="8">1.3× faster than XmlBeef</tspan></text>
+<text x="40.0" y="156.5" class="lang" text-anchor="start">C++</text>
+<text x="90" y="156.5"><tspan class="label">pugixml (ws_pcdata)*</tspan><tspan class="repo" dx="8">zeux/pugixml</tspan></text>
+<rect x="440" y="143.5" width="207.1" height="16" rx="3" class="bar"/>
+<text x="655.1" y="156.5" class="small"><tspan class="value">1.08×</tspan><tspan class="note-plain" dx="8">1.1× faster than XmlBeef</tspan></text>
+<text x="40.0" y="181.5" class="lang" text-anchor="start">Beef</text>
+<text x="90" y="181.5"><tspan class="label ours">XmlBeef</tspan><tspan class="repo" dx="8">mdsitton/XmlBeef</tspan></text>
+<rect x="440" y="168.5" width="191.8" height="16" rx="3" class="bar-ours"/>
+<text x="639.8" y="181.5" class="small"><tspan class="value ours">1.00×</tspan><tspan class="note-plain" dx="8">baseline</tspan></text>
+<text x="40.0" y="206.5" class="lang" text-anchor="start">Rust</text>
+<text x="90" y="206.5"><tspan class="label">roxmltree</tspan><tspan class="repo" dx="8">RazrFalcon/roxmltree</tspan></text>
+<rect x="440" y="193.5" width="90.6" height="16" rx="3" class="bar"/>
+<text x="538.6" y="206.5" class="small"><tspan class="value">0.47×</tspan><tspan class="note-plain" dx="8">XmlBeef 2.1× faster</tspan></text>
+<text x="40.0" y="231.5" class="lang" text-anchor="start">Java</text>
+<text x="90" y="231.5"><tspan class="label">JDK DOM*</tspan><tspan class="repo" dx="8">OpenJDK 27</tspan></text>
+<rect x="440" y="218.5" width="52.2" height="16" rx="3" class="bar"/>
+<text x="500.2" y="231.5" class="small"><tspan class="value">0.27×</tspan><tspan class="note-plain" dx="8">XmlBeef 3.7× faster</tspan></text>
+<text x="40.0" y="256.5" class="lang" text-anchor="start">Python</text>
+<text x="90" y="256.5"><tspan class="label">lxml</tspan><tspan class="repo" dx="8">lxml/lxml</tspan></text>
+<rect x="440" y="243.5" width="45.5" height="16" rx="3" class="bar"/>
+<text x="493.5" y="256.5" class="small"><tspan class="value">0.24×</tspan><tspan class="note-plain" dx="8">XmlBeef 4.2× faster</tspan></text>
+<text x="40.0" y="281.5" class="lang" text-anchor="start">C</text>
+<text x="90" y="281.5"><tspan class="label">libxml2</tspan><tspan class="repo" dx="8">GNOME/libxml2</tspan></text>
+<rect x="440" y="268.5" width="44.3" height="16" rx="3" class="bar"/>
+<text x="492.3" y="281.5" class="small"><tspan class="value">0.23×</tspan><tspan class="note-plain" dx="8">XmlBeef 4.3× faster</tspan></text>
+<text x="40.0" y="306.5" class="lang" text-anchor="start">C#</text>
+<text x="90" y="306.5"><tspan class="label">XDocument</tspan><tspan class="repo" dx="8">.NET 10 System.Xml.Linq</tspan></text>
+<rect x="440" y="293.5" width="28.3" height="16" rx="3" class="bar"/>
+<text x="476.3" y="306.5" class="small"><tspan class="value">0.15×</tspan><tspan class="note-plain" dx="8">XmlBeef 6.8× faster</tspan></text>
+<text x="40.0" y="331.5" class="lang" text-anchor="start">C#</text>
+<text x="90" y="331.5"><tspan class="label">XmlDocument</tspan><tspan class="repo" dx="8">.NET 10 System.Xml</tspan></text>
+<rect x="440" y="318.5" width="22.2" height="16" rx="3" class="bar"/>
+<text x="470.2" y="331.5" class="small"><tspan class="value">0.12×</tspan><tspan class="note-plain" dx="8">XmlBeef 8.6× faster</tspan></text>
+<text x="40.0" y="356.5" class="lang" text-anchor="start">Python</text>
+<text x="90" y="356.5"><tspan class="label">ElementTree</tspan><tspan class="repo" dx="8">Python 3.14 stdlib</tspan></text>
+<rect x="440" y="343.5" width="20.4" height="16" rx="3" class="bar"/>
+<text x="468.4" y="356.5" class="small"><tspan class="value">0.11×</tspan><tspan class="note-plain" dx="8">XmlBeef 9.4× faster</tspan></text>
+<text x="40.0" y="381.5" class="lang" text-anchor="start">Zig</text>
+<text x="90" y="381.5"><tspan class="label">nektro/zig-xml*</tspan><tspan class="repo" dx="8">nektro/zig-xml</tspan></text>
+<rect x="440" y="368.5" width="19.3" height="16" rx="3" class="bar"/>
+<text x="467.3" y="381.5" class="small"><tspan class="value">0.10×</tspan><tspan class="note-plain" dx="8">XmlBeef 9.9× faster</tspan></text>
+<text x="40.0" y="406.5" class="lang" text-anchor="start">Go</text>
+<text x="90" y="406.5"><tspan class="label">etree*</tspan><tspan class="repo" dx="8">beevik/etree</tspan></text>
+<rect x="440" y="393.5" width="15.5" height="16" rx="3" class="bar"/>
+<text x="463.5" y="406.5" class="small"><tspan class="value">0.081×</tspan><tspan class="note-plain" dx="8">XmlBeef 12× faster</tspan></text>
+<text x="40.0" y="431.5" class="lang" text-anchor="start">Go</text>
+<text x="90" y="431.5"><tspan class="label">xmlquery*</tspan><tspan class="repo" dx="8">antchfx/xmlquery</tspan></text>
+<rect x="440" y="418.5" width="12.8" height="16" rx="3" class="bar"/>
+<text x="460.8" y="431.5" class="small"><tspan class="value">0.067×</tspan><tspan class="note-plain" dx="8">XmlBeef 15× faster</tspan></text>
+<text x="40.0" y="456.5" class="lang" text-anchor="start">C#</text>
+<text x="90" y="456.5"><tspan class="label">XmlParser*</tspan><tspan class="repo" dx="8">KirillOsenkov/XmlParser</tspan></text>
+<rect x="440" y="443.5" width="10.4" height="16" rx="3" class="bar"/>
+<text x="458.4" y="456.5" class="small"><tspan class="value">0.054×</tspan><tspan class="note-plain" dx="8">XmlBeef 18× faster</tspan></text>
+<text x="40.0" y="481.5" class="lang" text-anchor="start">Rust</text>
+<text x="90" y="481.5"><tspan class="label">xmltree*</tspan><tspan class="repo" dx="8">eminence/xmltree-rs</tspan></text>
+<rect x="440" y="468.5" width="9.5" height="16" rx="3" class="bar"/>
+<text x="457.5" y="481.5" class="small"><tspan class="value">0.050×</tspan><tspan class="note-plain" dx="8">XmlBeef 20× faster</tspan></text>
+<text x="40.0" y="506.5" class="lang" text-anchor="start">JS</text>
+<text x="90" y="506.5"><tspan class="label">fast-xml-parser*</tspan><tspan class="repo" dx="8">NaturalIntelligence/fast-xml-parser</tspan></text>
+<rect x="440" y="493.5" width="9.2" height="16" rx="3" class="bar"/>
+<text x="457.2" y="506.5" class="small"><tspan class="value">0.048×</tspan><tspan class="note-plain" dx="8">XmlBeef 21× faster</tspan></text>
+<text x="40.0" y="531.5" class="lang" text-anchor="start">C++</text>
+<text x="90" y="531.5"><tspan class="label">Xerces-C</tspan><tspan class="repo" dx="8">apache/xerces-c</tspan></text>
+<rect x="440" y="518.5" width="7.4" height="16" rx="3" class="bar"/>
+<text x="455.4" y="531.5" class="small"><tspan class="value">0.038×</tspan><tspan class="note-plain" dx="8">XmlBeef 26× faster</tspan></text>
+<text x="40.0" y="556.5" class="lang" text-anchor="start">JS</text>
+<text x="90" y="556.5"><tspan class="label">xml2js*</tspan><tspan class="repo" dx="8">Leonidas-from-XIV/node-xml2js</tspan></text>
+<rect x="440" y="543.5" width="3.7" height="16" rx="3" class="bar"/>
+<text x="451.7" y="556.5" class="small"><tspan class="value">0.019×</tspan><tspan class="note-plain" dx="8">XmlBeef 52× faster</tspan></text>
+<text x="40.0" y="582.0" class="footnote" text-anchor="start">No comparable figure (failed every input): Beef-Lang-XML, Xml-Beef</text>
+<text x="40.0" y="608.0" class="group" text-anchor="start">PULL, EVENT AND SAX READERS</text>
+<text x="40.0" y="633.5" class="lang" text-anchor="start">Beef</text>
+<text x="90" y="633.5"><tspan class="label ours">XmlBeef reader</tspan><tspan class="repo" dx="8">mdsitton/XmlBeef</tspan></text>
+<rect x="440" y="620.5" width="240.0" height="16" rx="3" class="bar-ours"/>
+<text x="688.0" y="633.5" class="small"><tspan class="value ours">1.00×</tspan><tspan class="note-plain" dx="8">baseline</tspan></text>
+<text x="40.0" y="658.5" class="lang" text-anchor="start">Rust</text>
+<text x="90" y="658.5"><tspan class="label">xmlparser*</tspan><tspan class="repo" dx="8">RazrFalcon/xmlparser</tspan></text>
+<rect x="440" y="645.5" width="169.7" height="16" rx="3" class="bar"/>
+<text x="617.7" y="658.5" class="small"><tspan class="value">0.71×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 1.4× faster</tspan></text>
+<text x="40.0" y="683.5" class="lang" text-anchor="start">C#</text>
+<text x="90" y="683.5"><tspan class="label">TurboXml*</tspan><tspan class="repo" dx="8">xoofx/TurboXml</tspan></text>
+<rect x="440" y="670.5" width="155.8" height="16" rx="3" class="bar"/>
+<text x="603.8" y="683.5" class="small"><tspan class="value">0.65×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 1.5× faster</tspan></text>
+<text x="40.0" y="708.5" class="lang" text-anchor="start">Rust</text>
+<text x="90" y="708.5"><tspan class="label">quick-xml*</tspan><tspan class="repo" dx="8">tafia/quick-xml</tspan></text>
+<rect x="440" y="695.5" width="130.7" height="16" rx="3" class="bar"/>
+<text x="578.7" y="708.5" class="small"><tspan class="value">0.54×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 1.8× faster</tspan></text>
+<text x="40.0" y="733.5" class="lang" text-anchor="start">Java</text>
+<text x="90" y="733.5"><tspan class="label">Aalto*</tspan><tspan class="repo" dx="8">FasterXML/aalto-xml</tspan></text>
+<rect x="440" y="720.5" width="125.4" height="16" rx="3" class="bar"/>
+<text x="573.4" y="733.5" class="small"><tspan class="value">0.52×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 1.9× faster</tspan></text>
+<text x="40.0" y="758.5" class="lang" text-anchor="start">Java</text>
+<text x="90" y="758.5"><tspan class="label">Woodstox</tspan><tspan class="repo" dx="8">FasterXML/woodstox</tspan></text>
+<rect x="440" y="745.5" width="73.5" height="16" rx="3" class="bar"/>
+<text x="521.5" y="758.5" class="small"><tspan class="value">0.31×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 3.3× faster</tspan></text>
+<text x="40.0" y="783.5" class="lang" text-anchor="start">Java</text>
+<text x="90" y="783.5"><tspan class="label">JDK SAX*</tspan><tspan class="repo" dx="8">OpenJDK 27</tspan></text>
+<rect x="440" y="770.5" width="68.3" height="16" rx="3" class="bar"/>
+<text x="516.3" y="783.5" class="small"><tspan class="value">0.28×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 3.5× faster</tspan></text>
+<text x="40.0" y="808.5" class="lang" text-anchor="start">C</text>
+<text x="90" y="808.5"><tspan class="label">expat</tspan><tspan class="repo" dx="8">libexpat/libexpat</tspan></text>
+<rect x="440" y="795.5" width="67.4" height="16" rx="3" class="bar"/>
+<text x="515.4" y="808.5" class="small"><tspan class="value">0.28×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 3.6× faster</tspan></text>
+<text x="40.0" y="833.5" class="lang" text-anchor="start">Java</text>
+<text x="90" y="833.5"><tspan class="label">JDK StAX*</tspan><tspan class="repo" dx="8">OpenJDK 27</tspan></text>
+<rect x="440" y="820.5" width="62.8" height="16" rx="3" class="bar"/>
+<text x="510.8" y="833.5" class="small"><tspan class="value">0.26×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 3.8× faster</tspan></text>
+<text x="40.0" y="858.5" class="lang" text-anchor="start">C#</text>
+<text x="90" y="858.5"><tspan class="label">XmlReader</tspan><tspan class="repo" dx="8">.NET 10 System.Xml</tspan></text>
+<rect x="440" y="845.5" width="61.7" height="16" rx="3" class="bar"/>
+<text x="509.7" y="858.5" class="small"><tspan class="value">0.26×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 3.9× faster</tspan></text>
+<text x="40.0" y="883.5" class="lang" text-anchor="start">C</text>
+<text x="90" y="883.5"><tspan class="label">libxml2 reader</tspan><tspan class="repo" dx="8">GNOME/libxml2</tspan></text>
+<rect x="440" y="870.5" width="50.0" height="16" rx="3" class="bar"/>
+<text x="498.0" y="883.5" class="small"><tspan class="value">0.21×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 4.8× faster</tspan></text>
+<text x="40.0" y="908.5" class="lang" text-anchor="start">Zig</text>
+<text x="90" y="908.5"><tspan class="label">zig-xml*</tspan><tspan class="repo" dx="8">ianprime0509/zig-xml</tspan></text>
+<rect x="440" y="895.5" width="31.9" height="16" rx="3" class="bar"/>
+<text x="479.9" y="908.5" class="small"><tspan class="value">0.13×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 7.5× faster</tspan></text>
+<text x="40.0" y="933.5" class="lang" text-anchor="start">Beef</text>
+<text x="90" y="933.5"><tspan class="label">BeefXml reader*</tspan><tspan class="repo" dx="8">Rune-Magic/BeefXml</tspan></text>
+<rect x="440" y="920.5" width="21.5" height="16" rx="3" class="bar"/>
+<text x="469.5" y="933.5" class="small"><tspan class="value">0.089×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 11× faster</tspan></text>
+<text x="40.0" y="958.5" class="lang" text-anchor="start">Go</text>
+<text x="90" y="958.5"><tspan class="label">encoding/xml*</tspan><tspan class="repo" dx="8">Go standard library</tspan></text>
+<rect x="440" y="945.5" width="20.4" height="16" rx="3" class="bar"/>
+<text x="468.4" y="958.5" class="small"><tspan class="value">0.085×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 12× faster</tspan></text>
+<text x="40.0" y="983.5" class="lang" text-anchor="start">Rust</text>
+<text x="90" y="983.5"><tspan class="label">xml-rs</tspan><tspan class="repo" dx="8">kornelski/xml-rs</tspan></text>
+<rect x="440" y="970.5" width="12.9" height="16" rx="3" class="bar"/>
+<text x="460.9" y="983.5" class="small"><tspan class="value">0.054×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 19× faster</tspan></text>
+<text x="40.0" y="1008.5" class="lang" text-anchor="start">JS</text>
+<text x="90" y="1008.5"><tspan class="label">sax-js*</tspan><tspan class="repo" dx="8">isaacs/sax-js</tspan></text>
+<rect x="440" y="995.5" width="12.5" height="16" rx="3" class="bar"/>
+<text x="460.5" y="1008.5" class="small"><tspan class="value">0.052×</tspan><tspan class="note-plain" dx="8">XmlBeef reader 19× faster</tspan></text>
+<text x="40.0" y="1072.0" class="title" text-anchor="start">The fastest per input</text>
+<text x="40.0" y="1094.0" class="subtitle" text-anchor="start">MB/s · the fastest library that builds a document and the fastest reader · bars scaled per input</text>
+<line x1="40" y1="1118.0" x2="880" y2="1118.0" class="rule"/>
+<text x="220.0" y="1164.0" class="label" text-anchor="end">SVG icons (17k files)</text>
+<rect x="240" y="1125.0" width="123.4" height="13" rx="2" class="bar-ours"/>
+<text x="370.4" y="1136.0" class="small"><tspan class="value ours">695</tspan><tspan class="libname ours" dx="6">XmlBeef</tspan><tspan class="note-plain" dx="6">Beef document</tspan></text>
+<rect x="240" y="1142.0" width="300.0" height="13" rx="2" class="bar"/>
+<text x="547.0" y="1153.0" class="small"><tspan class="value">1690</tspan><tspan class="libname" dx="6">pugixml (ws_pcdata)</tspan><tspan class="note-plain" dx="6">C++ document</tspan></text>
+<rect x="240" y="1159.0" width="143.7" height="13" rx="2" class="bar-ours"/>
+<text x="390.7" y="1170.0" class="small"><tspan class="value ours">809</tspan><tspan class="libname ours" dx="6">XmlBeef reader</tspan><tspan class="note-plain" dx="6">Beef reader</tspan></text>
+<rect x="240" y="1176.0" width="120.7" height="13" rx="2" class="bar"/>
+<text x="367.7" y="1187.0" class="small"><tspan class="value">680</tspan><tspan class="libname" dx="6">xmlparser</tspan><tspan class="note-plain" dx="6">Rust reader</tspan></text>
+<line x1="40" y1="1200.0" x2="880" y2="1200.0" class="rule"/>
+<text x="220.0" y="1246.0" class="label" text-anchor="end">SVG artwork (Inkscape)</text>
+<rect x="240" y="1207.0" width="173.3" height="13" rx="2" class="bar-ours"/>
+<text x="420.3" y="1218.0" class="small"><tspan class="value ours">1150</tspan><tspan class="libname ours" dx="6">XmlBeef</tspan><tspan class="note-plain" dx="6">Beef document</tspan></text>
+<rect x="240" y="1224.0" width="300.0" height="13" rx="2" class="bar"/>
+<text x="547.0" y="1235.0" class="small"><tspan class="value">1990</tspan><tspan class="libname" dx="6">pugixml</tspan><tspan class="note-plain" dx="6">C++ document</tspan></text>
+<rect x="240" y="1241.0" width="234.2" height="13" rx="2" class="bar-ours"/>
+<text x="481.2" y="1252.0" class="small"><tspan class="value ours">1553</tspan><tspan class="libname ours" dx="6">XmlBeef reader</tspan><tspan class="note-plain" dx="6">Beef reader</tspan></text>
+<rect x="240" y="1258.0" width="123.7" height="13" rx="2" class="bar"/>
+<text x="370.7" y="1269.0" class="small"><tspan class="value">821</tspan><tspan class="libname" dx="6">xmlparser</tspan><tspan class="note-plain" dx="6">Rust reader</tspan></text>
+<line x1="40" y1="1282.0" x2="880" y2="1282.0" class="rule"/>
+<text x="220.0" y="1328.0" class="label" text-anchor="end">SVG (Illustrator-style)</text>
+<rect x="240" y="1289.0" width="269.6" height="13" rx="2" class="bar-ours"/>
+<text x="516.6" y="1300.0" class="small"><tspan class="value ours">1654</tspan><tspan class="libname ours" dx="6">XmlBeef</tspan><tspan class="note-plain" dx="6">Beef document</tspan></text>
+<rect x="240" y="1306.0" width="99.8" height="13" rx="2" class="bar"/>
+<text x="346.8" y="1317.0" class="small"><tspan class="value">612</tspan><tspan class="libname" dx="6">roxmltree</tspan><tspan class="note-plain" dx="6">Rust document</tspan></text>
+<rect x="240" y="1323.0" width="300.0" height="13" rx="2" class="bar-ours"/>
+<text x="547.0" y="1334.0" class="small"><tspan class="value ours">1840</tspan><tspan class="libname ours" dx="6">XmlBeef reader</tspan><tspan class="note-plain" dx="6">Beef reader</tspan></text>
+<rect x="240" y="1340.0" width="141.5" height="13" rx="2" class="bar"/>
+<text x="388.5" y="1351.0" class="small"><tspan class="value">868</tspan><tspan class="libname" dx="6">xmlparser</tspan><tspan class="note-plain" dx="6">Rust reader</tspan></text>
+<line x1="40" y1="1364.0" x2="880" y2="1364.0" class="rule"/>
+<text x="220.0" y="1410.0" class="label" text-anchor="end">records (XMark-like)</text>
+<rect x="240" y="1371.0" width="227.9" height="13" rx="2" class="bar-ours"/>
+<text x="474.9" y="1382.0" class="small"><tspan class="value ours">379</tspan><tspan class="libname ours" dx="6">XmlBeef</tspan><tspan class="note-plain" dx="6">Beef document</tspan></text>
+<rect x="240" y="1388.0" width="280.1" height="13" rx="2" class="bar"/>
+<text x="527.1" y="1399.0" class="small"><tspan class="value">466</tspan><tspan class="libname" dx="6">pugixml</tspan><tspan class="note-plain" dx="6">C++ document</tspan></text>
+<rect x="240" y="1405.0" width="300.0" height="13" rx="2" class="bar-ours"/>
+<text x="547.0" y="1416.0" class="small"><tspan class="value ours">499</tspan><tspan class="libname ours" dx="6">XmlBeef reader</tspan><tspan class="note-plain" dx="6">Beef reader</tspan></text>
+<rect x="240" y="1422.0" width="220.8" height="13" rx="2" class="bar"/>
+<text x="467.8" y="1433.0" class="small"><tspan class="value">367</tspan><tspan class="libname" dx="6">xmlparser</tspan><tspan class="note-plain" dx="6">Rust reader</tspan></text>
+<line x1="40" y1="1446.0" x2="880" y2="1446.0" class="rule"/>
+<text x="220.0" y="1492.0" class="label" text-anchor="end">book (XHTML text)</text>
+<rect x="240" y="1453.0" width="241.5" height="13" rx="2" class="bar-ours"/>
+<text x="488.5" y="1464.0" class="small"><tspan class="value ours">512</tspan><tspan class="libname ours" dx="6">XmlBeef</tspan><tspan class="note-plain" dx="6">Beef document</tspan></text>
+<rect x="240" y="1470.0" width="300.0" height="13" rx="2" class="bar"/>
+<text x="547.0" y="1481.0" class="small"><tspan class="value">636</tspan><tspan class="libname" dx="6">pugixml</tspan><tspan class="note-plain" dx="6">C++ document</tspan></text>
+<rect x="240" y="1487.0" width="286.4" height="13" rx="2" class="bar-ours"/>
+<text x="533.4" y="1498.0" class="small"><tspan class="value ours">607</tspan><tspan class="libname ours" dx="6">XmlBeef reader</tspan><tspan class="note-plain" dx="6">Beef reader</tspan></text>
+<rect x="240" y="1504.0" width="218.0" height="13" rx="2" class="bar"/>
+<text x="465.0" y="1515.0" class="small"><tspan class="value">462</tspan><tspan class="libname" dx="6">xmlparser</tspan><tspan class="note-plain" dx="6">Rust reader</tspan></text>
+<line x1="40" y1="1528.0" x2="880" y2="1528.0" class="rule"/>
+<text x="220.0" y="1574.0" class="label" text-anchor="end">OpenStreetMap</text>
+<rect x="240" y="1535.0" width="256.0" height="13" rx="2" class="bar-ours"/>
+<text x="503.0" y="1546.0" class="small"><tspan class="value ours">395</tspan><tspan class="libname ours" dx="6">XmlBeef</tspan><tspan class="note-plain" dx="6">Beef document</tspan></text>
+<rect x="240" y="1552.0" width="268.3" height="13" rx="2" class="bar"/>
+<text x="515.3" y="1563.0" class="small"><tspan class="value">414</tspan><tspan class="libname" dx="6">pugixml</tspan><tspan class="note-plain" dx="6">C++ document</tspan></text>
+<rect x="240" y="1569.0" width="300.0" height="13" rx="2" class="bar-ours"/>
+<text x="547.0" y="1580.0" class="small"><tspan class="value ours">463</tspan><tspan class="libname ours" dx="6">XmlBeef reader</tspan><tspan class="note-plain" dx="6">Beef reader</tspan></text>
+<rect x="240" y="1586.0" width="261.0" height="13" rx="2" class="bar"/>
+<text x="508.0" y="1597.0" class="small"><tspan class="value">403</tspan><tspan class="libname" dx="6">xmlparser</tspan><tspan class="note-plain" dx="6">Rust reader</tspan></text>
+<line x1="40" y1="1610.0" x2="880" y2="1610.0" class="rule"/>
+<text x="220.0" y="1656.0" class="label" text-anchor="end">Atom (namespaces)</text>
+<rect x="240" y="1617.0" width="243.9" height="13" rx="2" class="bar-ours"/>
+<text x="490.9" y="1628.0" class="small"><tspan class="value ours">397</tspan><tspan class="libname ours" dx="6">XmlBeef</tspan><tspan class="note-plain" dx="6">Beef document</tspan></text>
+<rect x="240" y="1634.0" width="300.0" height="13" rx="2" class="bar"/>
+<text x="547.0" y="1645.0" class="small"><tspan class="value">488</tspan><tspan class="libname" dx="6">pugixml</tspan><tspan class="note-plain" dx="6">C++ document</tspan></text>
+<rect x="240" y="1651.0" width="292.6" height="13" rx="2" class="bar-ours"/>
+<text x="539.6" y="1662.0" class="small"><tspan class="value ours">476</tspan><tspan class="libname ours" dx="6">XmlBeef reader</tspan><tspan class="note-plain" dx="6">Beef reader</tspan></text>
+<rect x="240" y="1668.0" width="252.7" height="13" rx="2" class="bar"/>
+<text x="499.7" y="1679.0" class="small"><tspan class="value">411</tspan><tspan class="libname" dx="6">xmlparser</tspan><tspan class="note-plain" dx="6">Rust reader</tspan></text>
+<line x1="40" y1="1692.0" x2="880" y2="1692.0" class="rule"/>
+<text x="220.0" y="1738.0" class="label" text-anchor="end">book, UTF-16</text>
+<rect x="240" y="1699.0" width="248.1" height="13" rx="2" class="bar-ours"/>
+<text x="495.1" y="1710.0" class="small"><tspan class="value ours">792</tspan><tspan class="libname ours" dx="6">XmlBeef</tspan><tspan class="note-plain" dx="6">Beef document</tspan></text>
+<rect x="240" y="1716.0" width="147.5" height="13" rx="2" class="bar"/>
+<text x="394.5" y="1727.0" class="small"><tspan class="value">470</tspan><tspan class="libname" dx="6">pugixml</tspan><tspan class="note-plain" dx="6">C++ document</tspan></text>
+<rect x="240" y="1733.0" width="300.0" height="13" rx="2" class="bar-ours"/>
+<text x="547.0" y="1744.0" class="small"><tspan class="value ours">957</tspan><tspan class="libname ours" dx="6">XmlBeef reader</tspan><tspan class="note-plain" dx="6">Beef reader</tspan></text>
+<rect x="240" y="1750.0" width="274.6" height="13" rx="2" class="bar"/>
+<text x="521.6" y="1761.0" class="small"><tspan class="value">876</tspan><tspan class="libname" dx="6">TurboXml</tspan><tspan class="note-plain" dx="6">C# reader</tspan></text>
+<line x1="40" y1="1774.0" x2="880" y2="1774.0" class="rule"/>
+<text x="40.0" y="1802.0" class="footnote" text-anchor="start">* pugixml failed SVG (Illustrator-style) (leaves references to DTD-declared entities unexpanded); parse_default drops whitespace-only</text>
+<text x="50.0" y="1818.0" class="footnote" text-anchor="start">text, so its text length is not compared.</text>
+<text x="40.0" y="1838.0" class="footnote" text-anchor="start">* pugixml (ws_pcdata) failed SVG (Illustrator-style) (leaves references to DTD-declared entities unexpanded).</text>
+<text x="40.0" y="1858.0" class="footnote" text-anchor="start">* JDK DOM failed SVG (Illustrator-style) (the JDK's default entity size limit).</text>
+<text x="40.0" y="1878.0" class="footnote" text-anchor="start">* nektro/zig-xml trims spaces and newlines from both ends of every text run; text not compared.</text>
+<text x="40.0" y="1898.0" class="footnote" text-anchor="start">* etree failed SVG (Illustrator-style) (no DTD entities).</text>
+<text x="40.0" y="1918.0" class="footnote" text-anchor="start">* xmlquery failed SVG (Illustrator-style) and book, UTF-16 (cannot decode UTF-16 with a BOM).</text>
+<text x="40.0" y="1938.0" class="footnote" text-anchor="start">* XmlParser failed SVG (Illustrator-style) (no DOCTYPE support); an editor's syntax tree that keeps the source text; only counts are</text>
+<text x="50.0" y="1954.0" class="footnote" text-anchor="start">compared.</text>
+<text x="40.0" y="1974.0" class="footnote" text-anchor="start">* xmltree failed SVG artwork (Inkscape), book (XHTML text) and book, UTF-16 (keys attributes by local name, so xml:lang and lang</text>
+<text x="50.0" y="1990.0" class="footnote" text-anchor="start">collide).</text>
+<text x="40.0" y="2010.0" class="footnote" text-anchor="start">* fast-xml-parser failed all but SVG icons (17k files), OpenStreetMap and Atom (namespaces) (leaves numeric character references</text>
+<text x="50.0" y="2026.0" class="footnote" text-anchor="start">undecoded; its default entity limits).</text>
+<text x="40.0" y="2046.0" class="footnote" text-anchor="start">* xml2js failed SVG (Illustrator-style) (no DTD entities).</text>
+<text x="40.0" y="2066.0" class="footnote" text-anchor="start">* xmlparser a tokenizer: values and text are raw spans, only counts are compared.</text>
+<text x="40.0" y="2086.0" class="footnote" text-anchor="start">* TurboXml failed SVG (Illustrator-style) (no DTD entities).</text>
+<text x="40.0" y="2106.0" class="footnote" text-anchor="start">* quick-xml failed SVG (Illustrator-style) (no DTD entities).</text>
+<text x="40.0" y="2126.0" class="footnote" text-anchor="start">* Aalto failed SVG (Illustrator-style) (no DTD entities).</text>
+<text x="40.0" y="2146.0" class="footnote" text-anchor="start">* JDK SAX failed SVG (Illustrator-style) (the JDK's default entity size limit).</text>
+<text x="40.0" y="2166.0" class="footnote" text-anchor="start">* JDK StAX failed SVG (Illustrator-style) (the JDK's default entity size limit).</text>
+<text x="40.0" y="2186.0" class="footnote" text-anchor="start">* zig-xml failed SVG (Illustrator-style) (no DTD support).</text>
+<text x="40.0" y="2206.0" class="footnote" text-anchor="start">* BeefXml reader failed SVG artwork (Inkscape), SVG (Illustrator-style), book (XHTML text) and book, UTF-16 (no CDATA before text,</text>
+<text x="50.0" y="2222.0" class="footnote" text-anchor="start">fetches the external DTD, wrong values); skips whitespace before every token; text not compared.</text>
+<text x="40.0" y="2242.0" class="footnote" text-anchor="start">* encoding/xml failed SVG (Illustrator-style) (no DTD entities).</text>
+<text x="40.0" y="2262.0" class="footnote" text-anchor="start">* sax-js failed SVG (Illustrator-style) (no DTD entities).</text>
+<text x="40.0" y="2290.0" class="footer" text-anchor="start">Linux x86-64, single thread · 1 s warm-up, then samples until 60% are within ±10% of their median · median of 3 processes · bench/compare</text>
+</svg>

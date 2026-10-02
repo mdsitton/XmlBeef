@@ -21,7 +21,12 @@ keeps going, for editors and linters. The plan, requirements and research are in
 - [`docs/implementation-survey.md`](docs/implementation-survey.md) — existing implementations in Beef and
   eight other languages
 - [`docs/test-suites.md`](docs/test-suites.md) — the W3C conformance suite and SVG corpora
-- [`bench/compare/`](bench/compare/) — benchmark of the existing implementations
+- [`bench/compare/`](bench/compare/) — benchmark against 24 other implementations
+  ([`results.md`](bench/compare/results.md), [`typed-results.md`](bench/compare/typed-results.md)):
+  the document reads 1.65–2.7× as fast as roxmltree and the reader 1.4–2.7× quick-xml, the fastest
+  reader on every input, all while passing every input
+
+![Benchmark](docs/benchmark.svg)
 
 ## License
 
