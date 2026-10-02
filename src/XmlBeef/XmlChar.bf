@@ -215,27 +215,31 @@ internal static class XmlChar
 	/// @param cp The code point to encode (must be 0–0x10FFFF, excluding surrogates).
 	public static void EncodeUtf8(String result, uint32 cp)
 	{
+		// One buffer call for the whole sequence (corlib's Append(char8) is not inlined)
 		if (cp < 0x80)
 		{
 			result.Append((char8)cp);
 		}
 		else if (cp < 0x800)
 		{
-			result.Append((char8)(0xC0 | (cp >> 6)));
-			result.Append((char8)(0x80 | (cp & 0x3F)));
+			char8* p = result.PrepareBuffer(2);
+			p[0] = (char8)(0xC0 | (cp >> 6));
+			p[1] = (char8)(0x80 | (cp & 0x3F));
 		}
 		else if (cp < 0x10000)
 		{
-			result.Append((char8)(0xE0 | (cp >> 12)));
-			result.Append((char8)(0x80 | ((cp >> 6) & 0x3F)));
-			result.Append((char8)(0x80 | (cp & 0x3F)));
+			char8* p = result.PrepareBuffer(3);
+			p[0] = (char8)(0xE0 | (cp >> 12));
+			p[1] = (char8)(0x80 | ((cp >> 6) & 0x3F));
+			p[2] = (char8)(0x80 | (cp & 0x3F));
 		}
 		else
 		{
-			result.Append((char8)(0xF0 | (cp >> 18)));
-			result.Append((char8)(0x80 | ((cp >> 12) & 0x3F)));
-			result.Append((char8)(0x80 | ((cp >> 6) & 0x3F)));
-			result.Append((char8)(0x80 | (cp & 0x3F)));
+			char8* p = result.PrepareBuffer(4);
+			p[0] = (char8)(0xF0 | (cp >> 18));
+			p[1] = (char8)(0x80 | ((cp >> 12) & 0x3F));
+			p[2] = (char8)(0x80 | ((cp >> 6) & 0x3F));
+			p[3] = (char8)(0x80 | (cp & 0x3F));
 		}
 	}
 

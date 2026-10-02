@@ -53,7 +53,8 @@ internal class XmlNameTable
 		public XmlNameId mLocal;
 	}
 
-	List<Entry> mEntries ~ delete _;
+	/// An XmlStack (inlined Add): a reader reset for every small file interns its names again.
+	XmlStack<Entry> mEntries ~ delete _;
 	/// Open addressing, a power of two; each slot holds an ID in its low half and the name's hash in its
 	/// high half (0: empty), so a probe that misses does not read the entry.
 	uint64[] mSlots ~ delete _;
@@ -125,7 +126,7 @@ internal class XmlNameTable
 	public void Release()
 	{
 		mEntries.Count = 1;
-		mEntries.Capacity = 16;
+		mEntries.TrimExcess();
 		delete mSlots;
 		mSlots = new uint64[64];
 		mText.Release();
@@ -133,7 +134,7 @@ internal class XmlNameTable
 	}
 
 	/// @brief The bytes the table holds (entries, slots, text), approximately.
-	public int ReservedBytes => mEntries.Capacity * strideof(Entry) + mSlots.Count * sizeof(uint64) + mText.ReservedBytes;
+	public int ReservedBytes => mEntries.ReservedBytes +mSlots.Count * sizeof(uint64) + mText.ReservedBytes;
 
 	/// A seeded hash of the bytes, read as whole words (overlapping at the end, never past it).
 	[Inline]

@@ -370,6 +370,9 @@ internal static class XmlEncodingDetector
 			return .None;
 		let lower = scope String(name);
 		lower.ToLower();
+		// The common case before the table, whose 154-case string switch is a chain of compares
+		if (lower == "utf-8")
+			return .Utf8;
 		if (XmlEncodingTables.TryGetByLabel(lower, out single))
 			return .SingleByte;
 		switch (lower)

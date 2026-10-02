@@ -197,7 +197,7 @@ public class XmlDocument
 	/// The reader behind Read, kept for its buffers.
 	XmlReader mReader ~ delete _;
 	/// Scratch for Read (open elements, the DOCTYPE's processing instructions) and Write.
-	List<uint32> mNodeStack ~ delete _;
+	XmlStack<uint32> mNodeStack ~ delete _;
 	List<uint32> mPendingDocTypeNodes ~ delete _;
 
 	/// @brief Create an empty document.
@@ -530,7 +530,7 @@ public class XmlDocument
 	Result<void, XmlParseError> Build<CMode>(XmlReader reader, XmlReadConfig config) where CMode : const int
 	{
 		mNamespaces = config.Namespaces;
-		mNodeStack.Clear();
+		mNodeStack.Count = 0;
 		mPendingDocTypeNodes.Clear();
 		const bool positions = CMode != 0;
 		const bool preserve = CMode == 2;

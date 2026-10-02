@@ -61,7 +61,7 @@ extension XmlDocument
 				mNodeStyles.Capacity * strideof(XmlNodeStyle) + mAttributeStyles.Capacity * strideof(XmlAttributeStyle) +
 				(mNodeRanges.Capacity + mAttributeRanges.Capacity) * strideof(XmlRangeRecord) + mLineStarts.Capacity * sizeof(int32) +
 				mSubsetItems.Capacity * strideof(XmlSubsetItem) + mErrors.Capacity * strideof(XmlParseError) + mNotations.Capacity * strideof(XmlNotation) +
-				(mNodeStack.Capacity + mPendingDocTypeNodes.Capacity) * sizeof(uint32) + mStyleEnds.Capacity * sizeof(int32) + mSourceName.AllocSize;
+				mNodeStack.ReservedBytes + mPendingDocTypeNodes.Capacity * sizeof(uint32) + mStyleEnds.Capacity * sizeof(int32) + mSourceName.AllocSize;
 			return usage;
 		}
 	}
@@ -200,7 +200,7 @@ extension XmlDocument
 		mNodeRanges.Capacity = 0;
 		mAttributeRanges.Capacity = 0;
 		mLineStarts.Capacity = 0;
-		mNodeStack.Capacity = 0;
+		mNodeStack.TrimExcess();
 		mPendingDocTypeNodes.Capacity = 0;
 		mStyleEnds.Capacity = 0;
 		mSubsetItems.Capacity = 0;
