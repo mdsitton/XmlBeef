@@ -1,6 +1,8 @@
 using System;
 using System.Collections;
 using System.Reflection;
+using FormatCore.Mapping;
+using internal FormatCore;
 
 namespace XmlBeef;
 
@@ -594,27 +596,11 @@ extension XmlSerializerCodeGen
 
 	/// The V of a Dictionary<K, V>, or null.
 	[Comptime]
-	static Type DictionaryValue(Type type)
-	{
-		if (let specialized = type as SpecializedGenericType)
-		{
-			if (specialized.UnspecializedType == typeof(Dictionary<,>))
-				return specialized.GetGenericArg(1);
-		}
-		return null;
-	}
+	static Type DictionaryValue(Type type) => TypeShapes.DictionaryValue(type);
 
 	/// The K of a Dictionary<K, V>, or null.
 	[Comptime]
-	static Type DictionaryKey(Type type)
-	{
-		if (let specialized = type as SpecializedGenericType)
-		{
-			if (specialized.UnspecializedType == typeof(Dictionary<,>))
-				return specialized.GetGenericArg(0);
-		}
-		return null;
-	}
+	static Type DictionaryKey(Type type) => TypeShapes.DictionaryKey(type);
 
 	/// The kind of a dictionary key type, or Unsupported: String, integers (decimal text) and simple enums
 	/// (their case names).
@@ -695,14 +681,17 @@ extension XmlSerializerCodeGen
 	}
 
 	/// The converter registered with [XmlConverter(typeof(target))] that the type being compiled can see,
-	/// or null. Two such registrations stop the build.
+	/// or null. Two such registrations stop the build. Only in the mixin stage (XmlSerializerCodeGen.Body):
+	/// there "current" is the user's project, and FormatCore's Registry.IsVisible is the user's project
+	/// and its dependencies (inside ApplyToType the user's declarations were seen only while the user's
+	/// project was XmlBeef's only dependent).
 	[Comptime]
 	static Type FindRegisteredConverter(Type target)
 	{
 		Type found = null;
 		for (let declaration in Type.TypeDeclarations)
 		{
-			if (!(declaration.DeclaredInCurrent || declaration.DeclaredInDependency || declaration.AlwaysVisible))
+			if (!Registry.IsVisible(declaration))
 				continue;
 			if (!(declaration.GetCustomAttribute<XmlConverterAttribute>() case .Ok(let registration)) || registration.mTarget != target)
 				continue;
@@ -715,7 +704,7 @@ extension XmlSerializerCodeGen
 	}
 
 	/// The [XmlObject] types an [XmlChildren] List<T> can hold: T itself for a struct, else every visible,
-	/// concrete class deriving from (or implementing) T.
+	/// concrete class deriving from (or implementing) T. Only in the mixin stage, as FindRegisteredConverter.
 	[Comptime]
 	static void ChildTypes(Type element, List<Type> types)
 	{
@@ -727,7 +716,7 @@ extension XmlSerializerCodeGen
 		}
 		for (let declaration in Type.TypeDeclarations)
 		{
-			if (!(declaration.DeclaredInCurrent || declaration.DeclaredInDependency || declaration.AlwaysVisible))
+			if (!Registry.IsVisible(declaration))
 				continue;
 			if (!declaration.HasCustomAttribute<XmlObjectAttribute>())
 				continue;
@@ -741,15 +730,7 @@ extension XmlSerializerCodeGen
 
 	/// The T of a List<T>, or null.
 	[Comptime]
-	static Type ListElement(Type type)
-	{
-		if (let specialized = type as SpecializedGenericType)
-		{
-			if (specialized.UnspecializedType == typeof(List<>))
-				return specialized.GetGenericArg(0);
-		}
-		return null;
-	}
+	static Type ListElement(Type type) => TypeShapes.ListElement(type);
 
 	/// An [XmlObject] type's element name: its Name, or its type name through its Naming.
 	[Comptime]
@@ -774,36 +755,11 @@ extension XmlSerializerCodeGen
 			ns.Append(attribute.Namespace);
 	}
 
-	/// Appends the XML name for `name`. Words start at an upper-case letter that follows a lower-case
-	/// letter or digit, or that ends an acronym (the last capital before a lower-case letter), so
-	/// `HTTPPort` splits as HTTP, Port; underscores also split.
+	/// Appends the XML name for `name` (FormatCore's Naming: words split at case changes, keeping
+	/// acronyms together, `HTTPPort` as HTTP, Port; underscores also split).
 	[Comptime]
 	static void ApplyNaming(StringView name, XmlNaming naming, String result)
 	{
-		if (naming == .AsDeclared)
-		{
-			result.Append(name);
-			return;
-		}
-		int words = 0;
-		int i = 0;
-		while (i < name.Length)
-		{
-			if (name[i] == '_')
-			{
-				i++;
-				continue;
-			}
-			int start = i++;
-			while (i < name.Length && name[i] != '_' && !(name[i].IsUpper && (name[i - 1].IsLower || name[i - 1].IsDigit ||
-				(name[i - 1].IsUpper && i + 1 < name.Length && name[i + 1].IsLower))))
-				i++;
-
-			if (words > 0 && (naming == .KebabCase || naming == .SnakeCase))
-				result.Append(naming == .KebabCase ? '-' : '_');
-			for (int j = start; j < i; j++)
-				result.Append((naming == .CamelCase && words > 0 && j == start) ? name[j].ToUpper : name[j].ToLower);
-			words++;
-		}
+		Naming.Apply(name, naming, result);
 	}
 }

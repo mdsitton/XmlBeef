@@ -28,6 +28,52 @@ class Item
 }
 #endif
 
+struct Temperature
+{
+	public double mCelsius;
+}
+
+// FIXTURE OkRegisteredConverter: OK
+#if FIXTURE_OkRegisteredConverter
+// Registered in this project while another project (Other) also depends on XmlBeef: found by the
+// mixin-stage lookup (before, through AlwaysVisible, it was not, and the field was not supported)
+[XmlConverter(typeof(Temperature))]
+struct TemperatureXml : IXmlConverter<Temperature>
+{
+	public static Result<void, XmlParseError> Read(XmlValueRef value, ref Temperature target)
+	{
+		if (!(double.Parse(value.mText) case .Ok(let celsius)))
+			return .Err(value.MakeError("expected a temperature"));
+		target.mCelsius = celsius;
+		return .Ok;
+	}
+
+	public static bool Write(Temperature value, String output)
+	{
+		XmlBind.AppendDouble(output, value.mCelsius);
+		return true;
+	}
+}
+
+[XmlObject]
+class Station
+{
+	public Temperature outside;
+	public List<Temperature> history ~ delete _;
+}
+#endif
+
+// FIXTURE OkSelfReference: OK
+#if FIXTURE_OkSelfReference
+// A type that holds itself: planned when its methods compile, so no type-initialization cycle
+[XmlObject(Name = "node")]
+class TreeNode
+{
+	public String label ~ delete _;
+	public List<TreeNode> children ~ DeleteContainerAndItems!(_);
+}
+#endif
+
 // FIXTURE OkSameNameInTwoNamespaces: OK
 #if FIXTURE_OkSameNameInTwoNamespaces
 [XmlObject(Name = "doc")]

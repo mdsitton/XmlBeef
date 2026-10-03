@@ -1,6 +1,8 @@
 using System;
 using System.Collections;
 using System.Reflection;
+using FormatCore.Mapping;
+using internal FormatCore;
 
 namespace XmlBeef;
 
@@ -17,23 +19,43 @@ namespace XmlBeef;
 /// the entry point and the emission of code from the plans.
 public static class XmlSerializerCodeGen
 {
-	/// @brief Emit IXmlSerializable into `type`.
+	/// The user-side comptime entry FormatCore's MappingDriver emits into every [XmlObject] type.
+	const String cEntry = "XmlGen_";
+
+	/// The parts Body writes.
+	const int cRead = 0;
+	const int cWrite = 1;
+	const int cClaimedElements = 2;
+	const int cClaimedAttributes = 3;
+	const int cTakesAllElements = 4;
+	const int cTakesAllAttributes = 5;
+	const int cMapsText = 6;
+	const int cShownSource = 7;
+
+	/// @brief Emit IXmlSerializable's signatures into `type` (ApplyToType). Every body is planned and
+	/// written later, when the member is compiled, through the [Comptime] entry emitted into the type
+	/// (FormatCore's MappingDriver): converter and [XmlChildren] subtype lookups then see the user's
+	/// project and its dependencies, however many projects use XmlBeef, and a type can hold itself
+	/// (`List<Node> children`) without the type-initialization cycle.
 	/// @param type A class or struct carrying [XmlObject].
 	/// @param naming How names become XML names.
 	/// @param elementName The type's element name (XmlObjectAttribute.Name), or empty for its name.
 	/// @param namespaceUri The type's namespace, or empty.
-	/// @param strict Whether reading rejects what no field maps.
+	/// @param strict Whether reading rejects what no field maps (read again by Body from the attribute).
 	/// @param showGenerated Whether to emit the code as text too (`XmlGeneratedSource`).
 	[Comptime]
 	public static void Emit(Type type, XmlNaming naming, StringView elementName, StringView namespaceUri, bool strict, bool showGenerated = false)
 	{
-		let read = scope String();
-		let write = scope String();
+		let code = scope String();
 		let ownerName = type.GetFullName(.. scope .());
-
-		// An [XmlObject] base already has the methods: hide them, and read and write its fields first
-		bool baseIsObject = type.BaseType != null && type.BaseType != typeof(Object) && type.BaseType.HasCustomAttribute<XmlObjectAttribute>();
+		// An [XmlObject] base already has the methods: hide them (each level reads its own fields after
+		// calling its base's)
+		bool baseIsObject = BaseIsObject(type);
 		StringView hide = baseIsObject ? "new " : "";
+		// The unspecialized pass of a generic type: stub bodies (each specialization gets its own pass)
+		bool open = MappingDriver.IsOpenType(type);
+		if (!open)
+			MappingDriver.EmitEntry(type, cEntry, "XmlBeef.XmlSerializerCodeGen.Body", baseIsObject);
 
 		let name = scope String();
 		if (!elementName.IsEmpty)
@@ -41,10 +63,93 @@ public static class XmlSerializerCodeGen
 		else
 			ApplyNaming(type.GetName(.. scope .()), naming, name);
 		CheckName(ownerName, "", name);
-		read.AppendF("public {}StringView XmlElementName => {};\n", hide, AppendLiteral(.. scope .(), name));
-		read.AppendF("public {}StringView XmlElementNamespace => {};\n", hide, AppendLiteral(.. scope .(), namespaceUri));
-		read.AppendF("public {}Result<void, XmlBeef.XmlParseError> XmlRead(XmlBeef.XmlNode _node, System.ITypedAllocator _alloc = null){}\n{{\n", hide, type.IsValueType ? " mut" : "");
-		write.AppendF("public {}Result<void, XmlBeef.XmlParseError> XmlWrite(XmlBeef.XmlNode _node)\n{{\n", hide);
+		code.AppendF("public {}StringView XmlElementName => {};\n", hide, AppendLiteral(.. scope .(), name));
+		code.AppendF("public {}StringView XmlElementNamespace => {};\n", hide, AppendLiteral(.. scope .(), namespaceUri));
+		// What the [XmlChildren] list and the strict check see: for a class through virtual properties,
+		// so that a base's code also leaves alone what a subclass's fields claim
+		code.AppendF("static {0}System.StringView[] sXmlClaimedElements = XmlClaimedElements_() ~ delete _;\nstatic {0}System.StringView[] XmlClaimedElements_()\n{{\n", hide);
+		AppendPart(code, open, cClaimedElements, "return new System.StringView[0];\n");
+		code.AppendF("}}\nstatic {0}System.StringView[] sXmlClaimedAttributes = XmlClaimedAttributes_() ~ delete _;\nstatic {0}System.StringView[] XmlClaimedAttributes_()\n{{\n", hide);
+		AppendPart(code, open, cClaimedAttributes, "return new System.StringView[0];\n");
+		code.Append("}\n");
+		if (!type.IsValueType)
+		{
+			StringView overriding = baseIsObject ? "override" : "virtual";
+			code.AppendF("protected {0} Span<StringView> XmlClaimedElementNames => sXmlClaimedElements;\nprotected {0} Span<StringView> XmlClaimedAttributeNames => sXmlClaimedAttributes;\n", overriding);
+			AppendProperty(code, overriding, "XmlTakesAllElements", open, cTakesAllElements);
+			AppendProperty(code, overriding, "XmlTakesAllAttributes", open, cTakesAllAttributes);
+			AppendProperty(code, overriding, "XmlMapsText", open, cMapsText);
+		}
+		code.AppendF("public {}Result<void, XmlBeef.XmlParseError> XmlRead(XmlBeef.XmlNode _node, System.ITypedAllocator _alloc = null){}\n{{\n", hide, type.IsValueType ? " mut" : "");
+		AppendPart(code, open, cRead, "return .Ok;\n");
+		code.AppendF("}}\npublic {}Result<void, XmlBeef.XmlParseError> XmlWrite(XmlBeef.XmlNode _node)\n{{\n", hide);
+		AppendPart(code, open, cWrite, "return .Ok;\n");
+		code.Append("}\n");
+		if (showGenerated)
+		{
+			bool hides = false;
+			if (baseIsObject && type.BaseType.GetCustomAttribute<XmlObjectAttribute>() case .Ok(let baseObject))
+				hides = baseObject.ShowGenerated;
+			code.AppendF("public {}static StringView XmlGeneratedSource\n{{\n\tget\n\t{{\n", hides ? "new " : "");
+			AppendPart(code, open, cShownSource, "return \"\";\n");
+			code.Append("\t}\n}\n");
+		}
+		Compiler.EmitAddInterface(type, typeof(IXmlSerializable));
+		Compiler.EmitTypeBody(type, code);
+	}
+
+	/// A generated member's body: the mixin of `part` (or, for an open generic type, `stub`).
+	[Comptime]
+	static void AppendPart(String code, bool open, int part, StringView stub)
+	{
+		if (open)
+			code.AppendF("\t{}", stub);
+		else
+			MappingDriver.AppendBody(code, "\t", cEntry, part);
+	}
+
+	/// A virtual bool property whose getter is the mixin of `part`.
+	[Comptime]
+	static void AppendProperty(String code, StringView overriding, StringView name, bool open, int part)
+	{
+		code.AppendF("protected {} bool {}\n{{\n\tget\n\t{{\n", overriding, name);
+		if (open)
+			code.Append("\t\treturn false;\n");
+		else
+			MappingDriver.AppendBody(code, "\t\t", cEntry, part);
+		code.Append("\t}\n}\n");
+	}
+
+	[Comptime]
+	static bool BaseIsObject(Type type)
+	{
+		return type.BaseType != null && type.BaseType != typeof(Object) && type.BaseType.HasCustomAttribute<XmlObjectAttribute>();
+	}
+
+	/// @brief The body of one generated member of `type`, mixed in when the member is compiled (through
+	/// the [Comptime] entry Emit put into the type, so lookups see the user's project).
+	/// @param type The [XmlObject] type.
+	/// @param part 0: XmlRead, 1: XmlWrite, 2 and 3: the claimed element and attribute names, 4-6:
+	/// XmlTakesAllElements, XmlTakesAllAttributes, XmlMapsText, 7: XmlGeneratedSource.
+	/// @param args Unused.
+	/// @return The code.
+	[Comptime]
+	public static String Body(Type type, int part, String args)
+	{
+		XmlNaming naming = .AsDeclared;
+		let namespaceUri = scope String();
+		bool strict = false;
+		if (type.GetCustomAttribute<XmlObjectAttribute>() case .Ok(let attribute))
+		{
+			naming = attribute.Naming;
+			if (attribute.Namespace != null)
+				namespaceUri.Append(attribute.Namespace);
+			strict = attribute.Strict;
+		}
+		let read = new String();
+		let write = scope String();
+		let ownerName = type.GetFullName(.. scope .());
+		bool baseIsObject = BaseIsObject(type);
 		if (baseIsObject)
 		{
 			read.Append("\tTry!(base.XmlRead(_node, _alloc));\n");
@@ -55,12 +160,24 @@ public static class XmlSerializerCodeGen
 		let claimedElements = scope String();
 		let claimedAttributes = scope String();
 		ScanChain(type, naming, namespaceUri, ownerName, claimedElements, let elementCount, claimedAttributes, let attributeCount, let allElements, let allAttributes, let mapsText);
-		// What the [XmlChildren] list and the strict check see: for a class through virtual properties,
-		// so that a base's code also leaves alone what a subclass's fields claim
-		if (elementCount > 0)
-			read.Insert(0, scope $"static StringView[{elementCount}] sXmlClaimedElements = .({claimedElements});\n");
-		if (attributeCount > 0)
-			read.Insert(0, scope $"static StringView[{attributeCount}] sXmlClaimedAttributes = .({claimedAttributes});\n");
+		switch (part)
+		{
+		case cClaimedElements:
+			read.Set(scope $"return new System.StringView[]({claimedElements});\n");
+			return read;
+		case cClaimedAttributes:
+			read.Set(scope $"return new System.StringView[]({claimedAttributes});\n");
+			return read;
+		case cTakesAllElements:
+			read.Set(allElements ? "return true;\n" : "return false;\n");
+			return read;
+		case cTakesAllAttributes:
+			read.Set(allAttributes ? "return true;\n" : "return false;\n");
+			return read;
+		case cMapsText:
+			read.Set(mapsText ? "return true;\n" : "return false;\n");
+			return read;
+		}
 		StringView elementsExpr;
 		StringView attributesExpr;
 		StringView allExpr;
@@ -68,8 +185,8 @@ public static class XmlSerializerCodeGen
 		StringView textExpr;
 		if (type.IsValueType)
 		{
-			elementsExpr = (elementCount > 0) ? "sXmlClaimedElements" : "default";
-			attributesExpr = (attributeCount > 0) ? "sXmlClaimedAttributes" : "default";
+			elementsExpr = "sXmlClaimedElements";
+			attributesExpr = "sXmlClaimedAttributes";
 			allExpr = allElements ? "true" : "false";
 			allAttributesExpr = allAttributes ? "true" : "false";
 			textExpr = mapsText ? "true" : "false";
@@ -81,12 +198,6 @@ public static class XmlSerializerCodeGen
 			allExpr = "this.XmlTakesAllElements";
 			allAttributesExpr = "this.XmlTakesAllAttributes";
 			textExpr = "this.XmlMapsText";
-			StringView overriding = baseIsObject ? "override" : "virtual";
-			read.Insert(0, scope $"protected {overriding} bool XmlTakesAllAttributes => {allAttributes ? "true" : "false"};\n");
-			read.Insert(0, scope $"protected {overriding} Span<StringView> XmlClaimedElementNames => {(elementCount > 0) ? "sXmlClaimedElements" : "default"};\n");
-			read.Insert(0, scope $"protected {overriding} Span<StringView> XmlClaimedAttributeNames => {(attributeCount > 0) ? "sXmlClaimedAttributes" : "default"};\n");
-			read.Insert(0, scope $"protected {overriding} bool XmlTakesAllElements => {allElements ? "true" : "false"};\n");
-			read.Insert(0, scope $"protected {overriding} bool XmlMapsText => {mapsText ? "true" : "false"};\n");
 		}
 
 		// 2. Every field's plan (its kinds and role), checked before any code is written
@@ -129,82 +240,51 @@ public static class XmlSerializerCodeGen
 
 		if (strict)
 			read.AppendF("\tTry!(XmlBeef.XmlBind.CheckStrict(_node, {}, {}, {}, {}, {}));\n", attributesExpr, elementsExpr, allExpr, allAttributesExpr, textExpr);
-		read.Append("\treturn .Ok;\n}\n");
-		write.Append("\treturn .Ok;\n}\n");
-
-		Compiler.EmitAddInterface(type, typeof(IXmlSerializable));
-		Compiler.EmitTypeBody(type, read);
-		Compiler.EmitTypeBody(type, write);
-		if (showGenerated)
+		read.Append("\treturn .Ok;\n");
+		write.Append("\treturn .Ok;\n");
+		if (part == cWrite)
+			read.Set(write);
+		else if (part == cShownSource)
 		{
-			let literal = scope String("\"");
-			for (let c in scope String()..Append(read)..Append(write).RawChars)
-			{
-				switch (c)
-				{
-				case '"': literal.Append("\\\"");
-				case '\\': literal.Append("\\\\");
-				case '\n': literal.Append("\\n");
-				case '\t': literal.Append("\\t");
-				default: literal.Append(c);
-				}
-			}
-			literal.Append('"');
-			bool hides = false;
-			if (baseIsObject && type.BaseType.GetCustomAttribute<XmlObjectAttribute>() case .Ok(let baseObject))
-				hides = baseObject.ShowGenerated;
-			Compiler.EmitTypeBody(type, scope $"public {hides ? "new " : ""}static StringView XmlGeneratedSource => {literal};\n");
+			// The two methods as compiled (FormatCore's Literal escapes the newlines and tabs)
+			StringView hide = baseIsObject ? "new " : "";
+			let shown = scope String();
+			shown.AppendF("public {}Result<void, XmlBeef.XmlParseError> XmlRead(XmlBeef.XmlNode _node, System.ITypedAllocator _alloc = null){}\n{{\n", hide, type.IsValueType ? " mut" : "");
+			shown.Append(read);
+			shown.AppendF("}}\npublic {}Result<void, XmlBeef.XmlParseError> XmlWrite(XmlBeef.XmlNode _node)\n{{\n", hide);
+			shown.Append(write);
+			shown.Append("}\n");
+			read.Set("return ");
+			Literal.Append(read, shown);
+			read.Append(";\n");
 		}
+		return read;
 	}
 
-	/// Appends `text` as a Beef string literal.
+	/// Appends `text` as a Beef string literal (FormatCore's Literal); a name with a control character
+	/// stops the build.
 	[Comptime]
 	static void AppendLiteral(String code, StringView text)
 	{
-		code.Append('"');
 		for (let c in text.RawChars)
 		{
-			switch (c)
-			{
-			case '"': code.Append("\\\"");
-			case '\\': code.Append("\\\\");
-			default:
-				if ((uint8)c < 0x20)
-					Runtime.FatalError(scope $"[XmlName] \"{text}\" contains a control character");
-				code.Append(c);
-			}
+			if ((uint8)c < 0x20)
+				Runtime.FatalError(scope $"[XmlName] \"{text}\" contains a control character");
 		}
-		code.Append('"');
+		Literal.Append(code, text);
 	}
 
-	/// The smallest and largest value of an integer type below 64 unsigned bits, as int64 source
-	/// expressions.
+	/// The smallest and largest value of an integer type as int64 source expressions (FormatCore's
+	/// IntegerBounds: a 64-bit unsigned type's minimum is 0; uint64 is read through IsUInt64's path for
+	/// its full range).
 	[Comptime]
 	static void IntegerRange(Type type, String min, String max)
 	{
-		int bits = type.Size * 8;
-		if (bits == 64)
-		{
-			min.Append("int64.MinValue");
-			max.Append("int64.MaxValue");
-		}
-		else if (type.IsSigned)
-		{
-			min.AppendF("{}", -(1L << (bits - 1)));
-			max.AppendF("{}", (1L << (bits - 1)) - 1);
-		}
-		else
-		{
-			min.Append("0");
-			max.AppendF("{}", (1L << bits) - 1);
-		}
+		IntegerBounds.Range(type, min, max);
 	}
 
 	[Comptime]
-	static bool IsUInt64(Type type)
-	{
-		return type.IsInteger && type.Size == 8 && !type.IsSigned;
-	}
+	static bool IsUInt64(Type type) => TypeShapes.IsUInt64(type);
 
 	/// "a, b, c": the enum's case names, for error messages.
 	[Comptime]
@@ -533,13 +613,27 @@ public static class XmlSerializerCodeGen
 		code.Append("\t{\n");
 		EmitReplaceList(code, "\t\t", name, listType, element);
 		code.AppendF("\t\tfor (let _c in _node.Children)\n\t\t{{\n\t\t\tif (_c.Kind != .Element || XmlBeef.XmlBind.IsClaimedElement(_c, {}))\n\t\t\t\tcontinue;\n", claimedExpr);
-		// The item types are found when this method is compiled, not now: they may derive from the type
-		// being generated (a Group holding Rects and Groups), which is not complete yet
-		code.AppendF("\t\t\tSystem.Compiler.Mixin(XmlBeef.XmlSerializerCodeGen.ChildrenDispatch(typeof({}), ", element.GetFullName(.. scope .()));
-		AppendLiteral(code, ownerName);
-		code.Append(", ");
-		AppendLiteral(code, name);
-		code.Append("));\n\t\t}\n\t}\n");
+		// The item types are found now, in the body stage, when every type is complete (a Group holding
+		// Rects and Groups) and the lookup sees the user's project; written inline (a nested mixin of a
+		// library method would be an evaluation whose current project is XmlBeef's again)
+		let dispatch = ChildrenDispatch(element, scope String(ownerName), scope String(name));
+		defer delete dispatch;
+		AppendIndented(code, "\t\t\t", dispatch);
+		code.Append("\t\t}\n\t}\n");
+	}
+
+	/// Appends each line of `text` with `indent` before it.
+	[Comptime]
+	static void AppendIndented(String code, StringView indent, StringView text)
+	{
+		for (let line in text.Split('\n'))
+		{
+			if (line.IsEmpty)
+				continue;
+			code.Append(indent);
+			code.Append(line);
+			code.Append('\n');
+		}
 	}
 
 	/// @brief The `switch` that reads child `_c` into the [XmlChildren] list `fieldName`, one case per
@@ -666,12 +760,13 @@ public static class XmlSerializerCodeGen
 		}
 		else if (plan.mMapStyle == .TypedEntries)
 		{
-			// The entry's element name says which subtype it is
-			code.AppendF("\t\t\t\tSystem.Compiler.Mixin(XmlBeef.XmlSerializerCodeGen.MapDispatch(typeof({}), ", valueType.GetFullName(.. scope .()));
-			AppendLiteral(code, ownerName);
-			code.Append(", ");
-			AppendLiteral(code, name);
-			code.AppendF(", {}));\n", AppendLiteral(.. scope .(), EntryKeyAttribute(plan).Substring(1, EntryKeyAttribute(plan).Length - 2)));
+			// The entry's element name says which subtype it is (written inline: see EmitReadChildren)
+			let key = EntryKeyAttribute(plan);
+			let dispatch = MapDispatch(valueType, scope String(ownerName), scope String(name), scope String(key.Substring(1, key.Length - 2)));
+			defer delete dispatch;
+			code.Append("\t\t\t\t{\n");
+			AppendIndented(code, "\t\t\t\t\t", dispatch);
+			code.Append("\t\t\t\t}\n");
 		}
 		else
 		{

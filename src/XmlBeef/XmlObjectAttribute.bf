@@ -72,21 +72,11 @@ public struct XmlObjectAttribute : Attribute, IComptimeTypeApply
 	}
 }
 
-/// @brief How [XmlObject] turns declared names into XML names. Words split at case changes, keeping
-/// acronyms together: `HTTPPort` is `http-port` in KebabCase.
-public enum XmlNaming
-{
-	/// @brief The name as written: `strokeWidth`, `PoolSize` (the default, as XML formats differ).
-	AsDeclared,
-	/// @brief `poolSize`.
-	CamelCase,
-	/// @brief `pool-size`.
-	KebabCase,
-	/// @brief `pool_size`.
-	SnakeCase,
-	/// @brief `poolsize`.
-	Lower
-}
+/// @brief How [XmlObject] turns declared names into XML names: FormatCore's NamingPolicy, shared by the
+/// four format libraries (AsDeclared, the default here as XML formats differ: `strokeWidth`; CamelCase
+/// `poolSize`; PascalCase `PoolSize`; SnakeCase `pool_size`; KebabCase `pool-size`; Lower `poolsize`).
+/// Words split at case changes, keeping acronyms together: `HTTPPort` is `http-port` in KebabCase.
+public typealias XmlNaming = FormatCore.Mapping.NamingPolicy;
 
 /// @brief Maps a field to `name` instead of its own name, optionally in a namespace.
 [AttributeUsage(.Field)]
