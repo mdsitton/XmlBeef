@@ -228,36 +228,8 @@ extension XmlDocument
 	}
 
 	// Attributes. The side tables (source ranges, PreserveStyle) follow their attributes: a table is
-	// in use when it is not empty, and attributes added since the read have default (empty) records.
-
-	void SideCopy<T>(List<T> list, int from, int to, int count) where T : struct
-	{
-		if (list.IsEmpty)
-			return;
-		while (list.Count < mAttributes.Count)
-			list.Add(default);
-		for (int i < count)
-			list[to + i] = list[from + i];
-	}
-
-	void SideClear<T>(List<T> list, int at) where T : struct
-	{
-		if (list.IsEmpty)
-			return;
-		while (list.Count < mAttributes.Count)
-			list.Add(default);
-		list[at] = default;
-	}
-
-	void SideRemove<T>(List<T> list, int at, int end) where T : struct
-	{
-		if (list.IsEmpty)
-			return;
-		while (list.Count < mAttributes.Count)
-			list.Add(default);
-		for (int i = at; i < end - 1; i++)
-			list[i] = list[i + 1];
-	}
+	// in use when it is not empty, and attributes added since the read have default (empty) records
+	// (FormatCore's SideTable Copy, ClearAt and RemoveAt).
 
 	/// Appends an attribute to an element, in place when its attributes are the last in the table, else
 	/// moving them to the end first (the old range becomes a hole until Clear).
@@ -272,13 +244,13 @@ extension XmlDocument
 			mAttributes.GrowUninitialized(count);
 			for (int i < count)
 				mAttributes[newStart + i] = mAttributes[start + i];
-			SideCopy(mAttributeRanges, start, newStart, count);
-			SideCopy(mAttributeStyles, start, newStart, count);
+			mAttributeRanges.Copy(start, newStart, count, mAttributes.Count);
+			mAttributeStyles.Copy(start, newStart, count, mAttributes.Count);
 			node.mAttributeStart = (int32)newStart;
 		}
 		mAttributes.Add(attribute);
-		SideClear(mAttributeRanges, mAttributes.Count - 1);
-		SideClear(mAttributeStyles, mAttributes.Count - 1);
+		mAttributeRanges.ClearAt(mAttributes.Count - 1, mAttributes.Count);
+		mAttributeStyles.ClearAt(mAttributes.Count - 1, mAttributes.Count);
 		node.mAttributeCount++;
 	}
 
@@ -289,8 +261,8 @@ extension XmlDocument
 		int end = node.mAttributeStart + node.mAttributeCount;
 		for (int i = at; i < end - 1; i++)
 			mAttributes[i] = mAttributes[i + 1];
-		SideRemove(mAttributeRanges, at, end);
-		SideRemove(mAttributeStyles, at, end);
+		mAttributeRanges.RemoveAt(at, end, mAttributes.Count);
+		mAttributeStyles.RemoveAt(at, end, mAttributes.Count);
 		node.mAttributeCount--;
 	}
 

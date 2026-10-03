@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using FormatCore;
+using internal FormatCore;
 using internal XmlBeef;
 
 namespace XmlBeef;
@@ -32,7 +34,7 @@ internal enum XmlStyleFlags : uint16
 }
 
 /// PreserveStyle: where a node's text is in the source (offsets into XmlDocument.mSource).
-internal struct XmlNodeStyle
+internal struct XmlNodeStyle : IMarkedStyle
 {
 	/// Where the text before the node starts (the end of the previous construct at its level):
 	/// whitespace between the prolog's items, and nothing in content, where all text is a node.
@@ -47,6 +49,16 @@ internal struct XmlNodeStyle
 	public int32 mInnerTail;
 	public int32 mEndTagStart;
 	public XmlStyleFlags mFlags;
+
+	// The flags as FormatCore's Marks sees them
+	[Inline]
+	public bool HasMarks(uint32 bits) => ((uint32)mFlags & bits) == bits;
+
+	[Inline]
+	public void AddMarks(uint32 bits) mut
+	{
+		mFlags |= (XmlStyleFlags)bits;
+	}
 }
 
 /// PreserveStyle: where an attribute's text is in the source.
@@ -66,12 +78,10 @@ internal struct XmlAttributeStyle
 /// PreserveStyle: recording the source while reading, and writing it back (plan.md §4.9).
 extension XmlDocument
 {
-	/// The node's style record, growing the list to reach it.
+	/// The node's style record, growing the table to reach it.
 	internal ref XmlNodeStyle NodeStyle(uint32 id)
 	{
-		while (mNodeStyles.Count <= (int)id)
-			mNodeStyles.Add(default);
-		return ref mNodeStyles[id];
+		return ref mNodeStyles.At((int)id);
 	}
 
 	internal XmlStyleFlags StyleFlags(uint32 id)
@@ -158,9 +168,7 @@ extension XmlDocument
 				if (attributeEnd <= 0)
 					continue;
 				int index = element.mAttributeStart + i;
-				while (mAttributeStyles.Count <= index)
-					mAttributeStyles.Add(default);
-				ref XmlAttributeStyle attribute = ref mAttributeStyles[index];
+				ref XmlAttributeStyle attribute = ref mAttributeStyles.At(index);
 				attribute.mLead = end;
 				attribute.mStart = (int32)offset;
 				// The first quote after the name is the opening one (only `=` and spaces are between)
@@ -211,18 +219,9 @@ extension XmlDocument
 	{
 		if (!mPreserve)
 			return;
-		uint32 current = id;
-		while (true)
-		{
-			ref XmlNodeStyle style = ref NodeStyle(current);
-			// Its ancestors were marked with it
-			if (style.mFlags.HasFlag(.SubtreeDirty))
-				return;
-			style.mFlags |= .SubtreeDirty;
-			if (current == 0)
-				return;
-			current = mNodes[current].mParent;
-		}
+		// Up to the first ancestor already marked (its ancestors were marked with it), the document node
+		// last (FormatCore's Marks)
+		Marks<XmlNodeRecord, XmlNodeStyle, const true>.MarkChanged(mNodes.Ptr, mNodeStyles, id, (uint32)XmlStyleFlags.SubtreeDirty);
 	}
 
 	/// Before a node leaves its place or after it takes one: it and its neighbors stop sharing source.

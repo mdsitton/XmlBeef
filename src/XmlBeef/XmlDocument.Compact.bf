@@ -60,8 +60,8 @@ extension XmlDocument
 			ForEachHeaderText(scope [&](text) => { live += OwnedLength(text); });
 			usage.mTextLive = live;
 			usage.mTotalReserved = usage.mTextReserved + mNodes.ReservedBytes + mAttributes.ReservedBytes + mNames.ReservedBytes +
-				mNodeStyles.Capacity * strideof(XmlNodeStyle) + mAttributeStyles.Capacity * strideof(XmlAttributeStyle) +
-				(mNodeRanges.Capacity + mAttributeRanges.Capacity) * strideof(XmlRangeRecord) + mLineStarts.ReservedBytes +
+				mNodeStyles.ReservedBytes + mAttributeStyles.ReservedBytes +
+				mNodeRanges.ReservedBytes + mAttributeRanges.ReservedBytes + mLineStarts.ReservedBytes +
 				mSubsetItems.Capacity * strideof(XmlSubsetItem) + mErrors.Capacity * strideof(XmlParseError) + mNotations.Capacity * strideof(XmlNotation) +
 				mNodeStack.ReservedBytes + mPendingDocTypeNodes.Capacity * sizeof(uint32) + mStyleEnds.Capacity * sizeof(int32) + mSourceName.AllocSize;
 			return usage;
@@ -103,10 +103,10 @@ extension XmlDocument
 
 		let nodes = new XmlStack<XmlNodeRecord>(Math.Max(order.Count, 16));
 		let attributes = new XmlStack<XmlAttributeRecord>(Math.Max(attributeCount, 16));
-		let nodeStyles = mNodeStyles.IsEmpty ? new List<XmlNodeStyle>() : new List<XmlNodeStyle>(order.Count);
-		let nodeRanges = mNodeRanges.IsEmpty ? new List<XmlRangeRecord>() : new List<XmlRangeRecord>(order.Count);
-		let attributeStyles = mAttributeStyles.IsEmpty ? new List<XmlAttributeStyle>() : new List<XmlAttributeStyle>(attributeCount);
-		let attributeRanges = mAttributeRanges.IsEmpty ? new List<XmlRangeRecord>() : new List<XmlRangeRecord>(attributeCount);
+		let nodeStyles = new SideTable<XmlNodeStyle>();
+		let nodeRanges = new SideTable<XmlRangeRecord>();
+		let attributeStyles = new SideTable<XmlAttributeStyle>();
+		let attributeRanges = new SideTable<XmlRangeRecord>();
 		for (let id in order)
 		{
 			var node = mNodes[id];
@@ -124,15 +124,15 @@ extension XmlDocument
 				attribute.mValue = MoveText(attribute.mValue, store, source);
 				attributes.Add(attribute);
 				if (!mAttributeStyles.IsEmpty)
-					attributeStyles.Add(i < mAttributeStyles.Count ? mAttributeStyles[i] : default);
+					attributeStyles.Add(mAttributeStyles.Get(i));
 				if (!mAttributeRanges.IsEmpty)
-					attributeRanges.Add(i < mAttributeRanges.Count ? mAttributeRanges[i] : default);
+					attributeRanges.Add(mAttributeRanges.Get(i));
 			}
 			nodes.Add(node);
 			if (!mNodeStyles.IsEmpty)
-				nodeStyles.Add(id < mNodeStyles.Count ? mNodeStyles[id] : default);
+				nodeStyles.Add(mNodeStyles.Get(id));
 			if (!mNodeRanges.IsEmpty)
-				nodeRanges.Add(id < mNodeRanges.Count ? mNodeRanges[id] : default);
+				nodeRanges.Add(mNodeRanges.Get(id));
 		}
 
 		// The places of the DOCTYPE's processing instructions in the subset's text: a removed one's stays,
@@ -196,10 +196,10 @@ extension XmlDocument
 		mNames.Release();
 		mNodes.TrimExcess();
 		mAttributes.TrimExcess();
-		mNodeStyles.Capacity = 0;
-		mAttributeStyles.Capacity = 0;
-		mNodeRanges.Capacity = 0;
-		mAttributeRanges.Capacity = 0;
+		mNodeStyles.Release();
+		mAttributeStyles.Release();
+		mNodeRanges.Release();
+		mAttributeRanges.Release();
 		mLineStarts.Release();
 		mNodeStack.TrimExcess();
 		mPendingDocTypeNodes.Capacity = 0;

@@ -187,9 +187,10 @@ public class XmlDocument
 	internal List<XmlNotation> mNotations ~ delete _;
 	/// Read with namespace processing.
 	internal bool mNamespaces;
-	/// Positions mode: the source range of each node (by ID) and attribute (by index); empty otherwise.
-	internal List<XmlRangeRecord> mNodeRanges ~ delete _;
-	internal List<XmlRangeRecord> mAttributeRanges ~ delete _;
+	/// Positions mode: the source range of each node (by ID) and attribute (by index); empty otherwise
+	/// (FormatCore's SideTable: in use when not empty, following attributes as they move).
+	internal SideTable<XmlRangeRecord> mNodeRanges ~ delete _;
+	internal SideTable<XmlRangeRecord> mAttributeRanges ~ delete _;
 	/// The document's copy of the input it was read from: values that are views of it are kept as they
 	/// are, and only decoded text (references, line ends) is copied into the store (FormatCore's
 	/// KeptSource).
@@ -208,8 +209,8 @@ public class XmlDocument
 	internal int32 mDeclarationStart;
 	internal int32 mDeclarationEnd;
 	internal int32 mTailStart;
-	internal List<XmlNodeStyle> mNodeStyles ~ delete _;
-	internal List<XmlAttributeStyle> mAttributeStyles ~ delete _;
+	internal SideTable<XmlNodeStyle> mNodeStyles ~ delete _;
+	internal SideTable<XmlAttributeStyle> mAttributeStyles ~ delete _;
 	/// While WriteBytes writes: the encoding generated pieces are checked for, and the options saying what
 	/// to do with a character it cannot hold (mFixing: a policy other than failing is active).
 	/// A mutation may have made the namespaces invalid (CheckNamespaces runs before WriteBytes).
@@ -688,7 +689,7 @@ public class XmlDocument
 	/// Records a source range at `index` of `ranges` (growing it with "no position" records). From memory
 	/// input only the offsets are recorded (line -1): TryGetRange locates them in the kept source when
 	/// asked. A stream keeps no source, so its ranges are located as they are read.
-	void RecordRange(List<XmlRangeRecord> ranges, int index, XmlReader reader, int offset, int length)
+	void RecordRange(SideTable<XmlRangeRecord> ranges, int index, XmlReader reader, int offset, int length)
 	{
 		if (!mSourceKept)
 			KeepSource(reader);
@@ -701,12 +702,10 @@ public class XmlDocument
 			record = .() { mLine = (int32)line, mColumn = (int32)column, mOffset = (int32)offset, mLength = (int32)length };
 		}
 		// Usually the next one
-		while (ranges.Count < index)
-			ranges.Add(default);
 		if (index == ranges.Count)
 			ranges.Add(record);
 		else
-			ranges[index] = record;
+			ranges.At(index) = record;
 	}
 
 	/// At the first event of a read with metadata: the source text the reader's offsets index, kept as
@@ -743,7 +742,7 @@ public class XmlDocument
 	}
 
 	/// The recorded source range, if the document was read with positions and the item has one.
-	internal bool TryGetRange(List<XmlRangeRecord> ranges, int index, out XmlSourceRange range)
+	internal bool TryGetRange(SideTable<XmlRangeRecord> ranges, int index, out XmlSourceRange range)
 	{
 		if (index < ranges.Count && ranges[index].mLine != 0)
 		{
