@@ -267,10 +267,10 @@ internal static class XmlEncodingDetector
 	public static XmlParseError DecodeError(StringView error, XmlEncoding encoding, StringView declared, char8 byte, StringView text, int produced)
 	{
 		if (encoding == .Utf8 || encoding == .Utf16LE || encoding == .Utf16BE || encoding == .Utf32LE || encoding == .Utf32BE)
-			return XmlParseError.At(.InvalidEncoding, error, text, produced);
+			return XmlParseError.At<XmlText>(.InvalidEncoding, error, text, produced);
 		let message = scope String();
 		message.AppendF("The byte 0x{:X2} is not defined in the encoding `{}`", (uint8)byte, declared.IsEmpty ? "Windows-1252" : declared);
-		return XmlParseError.At(.InvalidEncoding, message, text, produced);
+		return XmlParseError.At<XmlText>(.InvalidEncoding, message, text, produced);
 	}
 
 	/// Whether `input` is well-formed UTF-8 (the fallback's test; Char rules are checked later either way).
@@ -406,7 +406,7 @@ internal static class XmlEncodingDetector
 	{
 		let message = scope String();
 		message.AppendF("The encoding `{}` is not supported", name);
-		return XmlParseError.At(.UnsupportedEncoding, message, text, Math.Max(name.Ptr - text.Ptr, 0), name.Length);
+		return XmlParseError.At<XmlText>(.UnsupportedEncoding, message, text, Math.Max(name.Ptr - text.Ptr, 0), name.Length);
 	}
 
 	static XmlParseError Mismatch(StringView text, StringView actual, int skip)
@@ -414,7 +414,7 @@ internal static class XmlEncodingDetector
 		let name = DeclaredEncoding(text.Substring(skip));
 		let message = scope String();
 		message.AppendF("The encoding declaration `{}` contradicts the document's encoding, {}", name, actual);
-		return XmlParseError.At(.UnsupportedEncoding, message, text, Math.Max(name.Ptr - text.Ptr, 0), name.Length);
+		return XmlParseError.At<XmlText>(.UnsupportedEncoding, message, text, Math.Max(name.Ptr - text.Ptr, 0), name.Length);
 	}
 }
 

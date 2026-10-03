@@ -565,7 +565,7 @@ extension XmlDocument
 		message.AppendF(" cannot be written in the document's encoding ({})", encoding);
 		if (options.Unencodable == .CharacterReference)
 			message.Append(" (where XML has no character reference: a comment, a processing instruction, a name)");
-		return .Err(XmlParseError.At(.InvalidEncoding, message, text, bad, length));
+		return .Err(XmlParseError.At<XmlText>(.InvalidEncoding, message, text, bad, length));
 	}
 
 	/// The `encoding` of the XML declaration at the start of `text` (after a byte order mark) made
