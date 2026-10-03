@@ -547,7 +547,7 @@ extension XmlDocument
 			WriteCanonical(text, options);
 
 		int before = output.Count;
-		int bad = (encoding == .Custom) ? 0 : XmlEncoder.Encode(text, encoding, output);
+		int bad = (encoding == .Custom) ? 0 : Encoder.Encode(text, encoding, output);
 		if (bad < 0)
 			return .Ok;
 		output.Count = before;
@@ -555,7 +555,7 @@ extension XmlDocument
 		{
 			// The whole document in UTF-8, saying so in its declaration
 			SetDeclaredEncoding(text, "UTF-8");
-			XmlEncoder.Encode(text, .Utf8, output);
+			Encoder.Encode(text, .Utf8, output);
 			return .Ok;
 		}
 		char32 cp = Utf8.Decode(text.Ptr, bad, let length);

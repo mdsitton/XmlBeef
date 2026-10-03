@@ -69,7 +69,8 @@ public class XmlReader
 	/// The core reading now (mBytes or mStream): the event's state is read from it.
 	XmlReaderCoreBase mCore;
 	bool mStreaming;
-	String mTranscoded ~ delete _;
+	/// The transcoding of in-memory input in another encoding.
+	XmlStreamState mTranscoded ~ delete _;
 
 	/// @brief Create a reader with no input; call Reset before reading.
 	public this()
@@ -124,7 +125,6 @@ public class XmlReader
 	{
 		mStreaming = false;
 		mCore = mBytes;
-		mTranscoded.Clear();
 		mBytes.Reset(XmlByteCursor(input, mTranscoded, config), config, names);
 	}
 

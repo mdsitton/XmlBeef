@@ -321,7 +321,8 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 	internal TCursor mCursor;
 
 	/// Starts a read. `names`: a table to intern into (a document's, already cleared by it); null for
-	/// the reader's own, which is cleared.
+	/// the reader's own, which is cleared. Inlined, so the cursor is built in place rather than copied.
+	[Inline]
 	public void Reset(TCursor cursor, XmlReadConfig config, XmlNameTable names = null)
 	{
 		mCursor = cursor;

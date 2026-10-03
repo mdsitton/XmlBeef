@@ -402,7 +402,7 @@ extension XmlDocument
 				continue;
 			}
 			char32 c = Utf8.Decode(output.Ptr, i, let length);
-			if (XmlEncoder.CanEncode(c, mFixEncoding))
+			if (Encoder.CanEncode(c, mFixEncoding))
 			{
 				i += length;
 				continue;

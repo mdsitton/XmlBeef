@@ -1,15 +1,17 @@
 using System;
+using System.IO;
 using FormatCore;
 using internal FormatCore;
 using internal XmlBeef;
 
 namespace XmlBeef;
 
-/// Where XmlReaderCore's bytes come from (KdlBeef's IKdlCursor). The reader reads a window of the input
-/// through a pointer `data` indexed by absolute offsets (`data[offset]`, valid for
-/// `windowStart <= offset < end`), so offsets it keeps stay valid when a stream moves or grows its
-/// buffer; only `data`, `windowStart` and `end` change. The bytes are UTF-8 checked by
-/// XmlChar.FindInvalid, transcoded first when the document is in another encoding.
+/// Where XmlReaderCore's bytes come from: FormatCore's window protocol (`IInputCursor`: the reader reads
+/// a window of the input through a pointer `data` indexed by absolute offsets, valid for
+/// `windowStart <= offset < end`, so offsets it keeps stay valid when a stream moves or grows its
+/// buffer) with XML's errors and what the reader reports about the encoding. The two cursors are thin
+/// adapters over FormatCore's transcoding cursors (detection by XmlDetector, validation by XmlText); every
+/// member is inlined into the core.
 internal interface IXmlCursor
 {
 	/// Detects the encoding, validates what it can up front (all of an in-memory input) and sets up the
@@ -43,58 +45,71 @@ internal interface IXmlCursor
 }
 
 /// Counts lines forward through the input, and columns only when asked (FormatCore's LineCounter, which
-/// started as this one): a stream locates only the elements still open when its buffer moves
-/// (XmlReaderCore.ResolvePositions), errors, and the bytes it drops, so most bytes are only scanned
-/// for newlines, once.
+/// started as XmlBeef's).
 typealias XmlLineCounter = LineCounter<XmlText>;
 
+/// What a stream read owns (FormatCore's TranscodingState: the UTF-8 window buffer, the raw bytes, the
+/// whole input's transcoding when a converter or the fallback needs it, and the input's error).
+typealias XmlStreamState = TranscodingState;
+
+/// The cursor-level settings of a read config, and its error conversion.
+internal static class XmlInput
+{
+	/// @brief FormatCore's cursor settings for `config`.
+	[Inline]
+	public static InputSettings Settings(XmlReadConfig config)
+	{
+		InputSettings settings = default;
+		settings.mMaxInputBytes = config.MaxInputBytes;
+		settings.mMaxTokenBytes = config.MaxTokenBytes;
+		settings.mStreamBufferBytes = config.StreamBufferBytes;
+		// UTF-16 and UTF-32 are detected and decoded (XmlDetector), not rejected
+		settings.mIgnoreWideEncodings = true;
+		settings.mFormatName = "XML";
+		return settings;
+	}
+
+	/// @brief The converter and the fallback of `config`.
+	[Inline]
+	public static TranscodeSettings Transcode(XmlReadConfig config)
+	{
+		TranscodeSettings transcode = default;
+		transcode.mConverter = config.EncodingConverter;
+		transcode.mFallback = config.EncodingFallback;
+		return transcode;
+	}
+
+	/// @brief An input error as XML's (the message copied into XmlParseError's buffer).
+	public static XmlParseError Error(InputError error)
+	{
+		return XmlParseError(XmlText.MapKind(error.mKind), error.mMessage, error.mLine, error.mColumn, error.mOffset, error.mLength);
+	}
+}
+
 /// An in-memory input: the window is the whole (transcoded) input, validated up front; Fill never has
-/// more.
+/// more (FormatCore's TranscodingByteCursor).
 internal struct XmlByteCursor : IXmlCursor
 {
-	StringView mInput;
-	StringView mText;
-	/// Receives the UTF-8 text of a document in another encoding (owned by the reader).
-	String mTranscoded;
-	XmlReadConfig mConfig;
-	int mMaxInputBytes;
-	XmlLineCounter mLines;
-	XmlEncoding mEncoding;
-	bool mBomOverride;
+	TranscodingByteCursor<XmlText, XmlDetector> mInner;
 
-	public this(StringView input, String transcoded, XmlReadConfig config)
+	/// @brief A cursor over `input`.
+	/// @param input The document's bytes.
+	/// @param state Receives the UTF-8 text of a document in another encoding (owned by the reader).
+	/// @param config The read config.
+	public this(StringView input, XmlStreamState state, XmlReadConfig config)
 	{
-		mBomOverride = false;
-		mInput = input;
-		mText = input;
-		mTranscoded = transcoded;
-		mConfig = config;
-		mMaxInputBytes = config.MaxInputBytes;
-		mLines = .(0);
-		mEncoding = .Utf8;
+		mInner = .(input, state, XmlInput.Settings(config), XmlInput.Transcode(config));
 	}
 
 	public Result<int, XmlParseError> Begin(ref char8* data, ref int windowStart, ref int end) mut
 	{
-		data = mInput.Ptr;
-		windowStart = 0;
-		end = 0;
-		if (mMaxInputBytes > 0 && mInput.Length > mMaxInputBytes)
-			return .Err(XmlParseError(.ResourceLimitExceeded, scope $"The input ({mInput.Length} bytes) exceeds MaxInputBytes ({mMaxInputBytes})", 1, 1, 0, 0));
-		int start = 0;
-		if (XmlEncodingDetector.Prepare(mInput, mTranscoded, mConfig, out mText, out start, out mEncoding, out mBomOverride) case .Err(let error))
-			return .Err(error);
-		data = mText.Ptr;
-		end = mText.Length;
-		mLines = .(start);
-		let message = scope String();
-		int bad = XmlChar.FindInvalid(mText.Ptr, start, mText.Length, message, let kind, let length);
-		if (bad >= 0)
+		switch (mInner.Begin(ref data, ref windowStart, ref end))
 		{
-			Locate(bad, let line, let column);
-			return .Err(XmlParseError(kind, message, line, column, bad, length));
+		case .Ok(let start):
+			return start;
+		case .Err(let error):
+			return .Err(XmlInput.Error(error));
 		}
-		return start;
 	}
 
 	[Inline]
@@ -116,12 +131,12 @@ internal struct XmlByteCursor : IXmlCursor
 		get => false;
 	}
 
-	public XmlEncoding Encoding => mEncoding;
+	public XmlEncoding Encoding => mInner.Encoding;
 
-	public bool BomOverridesDeclaration => mBomOverride;
+	public bool BomOverridesDeclaration => mInner.Detection.mBomOverride;
 
 	/// The UTF-8 text the reader's offsets index (after Begin): the input, or its transcoding.
-	public StringView Text => mText;
+	public StringView Text => mInner.Text;
 
 	public bool LocatesOnlyForward
 	{
@@ -129,16 +144,78 @@ internal struct XmlByteCursor : IXmlCursor
 		get => false;
 	}
 
+	[Inline]
 	public bool Locate(int offset, out int line, out int column) mut
 	{
-		int target = Math.Min(offset, mText.Length);
-		if (target < mLines.mPos)
+		return mInner.Locate(offset, out line, out column);
+	}
+}
+
+/// A stream read through a buffer (FormatCore's TranscodingStreamCursor): the window is the decoded part
+/// of the input from the reader's current construct on. The encoding is detected from the stream's first
+/// XmlDetector.cPrefixBytes (more while the declaration goes on); the rest is decoded as it arrives, so
+/// offsets are UTF-8 offsets exactly as for the same document in memory. A converter or the Windows-1252
+/// fallback needs the whole input at once: the stream is then read to its end first.
+internal struct XmlBufferedStreamCursor : IXmlCursor
+{
+	TranscodingStreamCursor<XmlText, XmlDetector> mInner;
+
+	/// @brief A cursor over `stream`.
+	/// @param stream The stream.
+	/// @param state The buffers and error storage (reused across reads).
+	/// @param config The read config.
+	public this(Stream stream, XmlStreamState state, XmlReadConfig config)
+	{
+		mInner = .(stream, state, XmlInput.Settings(config), XmlInput.Transcode(config));
+	}
+
+	public Result<int, XmlParseError> Begin(ref char8* data, ref int windowStart, ref int end) mut
+	{
+		switch (mInner.Begin(ref data, ref windowStart, ref end))
 		{
-			// Behind the counter (an error before the last position asked for): count from the start
-			XmlChar.LineAndColumn(mText, target, out line, out column);
+		case .Ok(let start):
+			return start;
+		case .Err(let error):
+			return .Err(XmlInput.Error(error));
+		}
+	}
+
+	[Inline]
+	public bool Fill(ref char8* data, ref int windowStart, ref int end, int keep, int pos, int count) mut
+	{
+		return mInner.Fill(ref data, ref windowStart, ref end, keep, pos, count);
+	}
+
+	public bool TryGetInputError(out XmlParseError error)
+	{
+		if (mInner.TryGetInputError(let inputError))
+		{
+			error = XmlInput.Error(inputError);
 			return true;
 		}
-		mLines.Locate(mText.Ptr, target, mText.Length, out line, out column);
-		return true;
+		error = default;
+		return false;
+	}
+
+	public bool HasInputError
+	{
+		[Inline]
+		get => mInner.HasInputError;
+	}
+
+	public XmlEncoding Encoding => mInner.Encoding;
+
+	public bool BomOverridesDeclaration => mInner.Detection.mBomOverride;
+
+	public bool LocatesOnlyForward
+	{
+		[Inline]
+		get => true;
+	}
+
+	[Inline]
+	public bool Locate(int offset, out int line, out int column) mut
+	{
+		return mInner.Locate(offset, out line, out column);
 	}
 }
