@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using FormatCore;
+using internal FormatCore;
 using internal XmlBeef;
 
 namespace XmlBeef;
@@ -375,8 +377,6 @@ public struct XmlDescendants : IEnumerable<XmlNode>
 /// Parsing of attribute and text values into numbers and booleans.
 internal static class XmlValueParser
 {
-	static System.Globalization.NumberFormatInfo sNumberFormat = new .() ~ delete _;
-
 	/// The text without XML whitespace at either end.
 	static StringView Trim(StringView text)
 	{
@@ -481,14 +481,9 @@ internal static class XmlValueParser
 		}
 		if (i != s.Length)
 			return false;
-		switch (double.Parse(s, sNumberFormat))
-		{
-		case .Ok(let parsed):
-			value = parsed;
-			return true;
-		case .Err:
-			return false;
-		}
+		// Correctly rounded and culture-independent (FormatCore's DecimalParse: Clinger's fast path, then
+		// corlib's parser with `.` pinned)
+		return DecimalParse.ParseDouble(s, out value);
 	}
 
 	public static bool TryParseBool(StringView text, out bool value)
