@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using FormatCore;
+using internal FormatCore;
 using internal XmlBeef;
 
 namespace XmlBeef;
@@ -59,7 +61,7 @@ extension XmlDocument
 			usage.mTextLive = live;
 			usage.mTotalReserved = usage.mTextReserved + mNodes.ReservedBytes + mAttributes.ReservedBytes + mNames.ReservedBytes +
 				mNodeStyles.Capacity * strideof(XmlNodeStyle) + mAttributeStyles.Capacity * strideof(XmlAttributeStyle) +
-				(mNodeRanges.Capacity + mAttributeRanges.Capacity) * strideof(XmlRangeRecord) + mLineStarts.Capacity * sizeof(int32) +
+				(mNodeRanges.Capacity + mAttributeRanges.Capacity) * strideof(XmlRangeRecord) + mLineStarts.ReservedBytes +
 				mSubsetItems.Capacity * strideof(XmlSubsetItem) + mErrors.Capacity * strideof(XmlParseError) + mNotations.Capacity * strideof(XmlNotation) +
 				mNodeStack.ReservedBytes + mPendingDocTypeNodes.Capacity * sizeof(uint32) + mStyleEnds.Capacity * sizeof(int32) + mSourceName.AllocSize;
 			return usage;
@@ -199,7 +201,7 @@ extension XmlDocument
 		mAttributeStyles.Capacity = 0;
 		mNodeRanges.Capacity = 0;
 		mAttributeRanges.Capacity = 0;
-		mLineStarts.Capacity = 0;
+		mLineStarts.Release();
 		mNodeStack.TrimExcess();
 		mPendingDocTypeNodes.Capacity = 0;
 		mStyleEnds.Capacity = 0;

@@ -172,7 +172,7 @@ public class XmlDocument
 	/// it on demand, through the line starts (built on first use).
 	internal StringView mSource;
 	bool mSourceKept;
-	List<int32> mLineStarts ~ delete _;
+	LineIndex<XmlText> mLineStarts ~ delete _;
 	internal bool mHasBom;
 	internal int32 mContentStart;
 	internal int32 mDeclarationStart;
@@ -736,41 +736,7 @@ public class XmlDocument
 	/// Line and column of `offset` in the kept source, through an index of line starts built on first use.
 	void LocateInSource(int offset, out int line, out int column)
 	{
-		if (mLineStarts.IsEmpty)
-		{
-			int i = Utf8.StartsWithBom(mSource.Ptr, mSource.Length) ? 3 : 0;
-			mLineStarts.Add((int32)i);
-			while (i < mSource.Length)
-			{
-				int newline = Utf8.AsciiNewlineLength(mSource.Ptr, i, mSource.Length);
-				if (newline > 0)
-				{
-					i += newline;
-					mLineStarts.Add((int32)i);
-				}
-				else
-					i++;
-			}
-		}
-		// The last line start at or before the offset
-		int low = 0;
-		int high = mLineStarts.Count - 1;
-		while (low < high)
-		{
-			int mid = (low + high + 1) / 2;
-			if (mLineStarts[mid] <= offset)
-				low = mid;
-			else
-				high = mid - 1;
-		}
-		line = low + 1;
-		column = 1;
-		int end = Math.Min(offset, mSource.Length);
-		for (int i = mLineStarts[low]; i < end; i++)
-		{
-			if (((uint8)mSource[i] & 0xC0) != 0x80)
-				column++;
-		}
+		mLineStarts.Locate(mSource.Ptr, mSource.Length, offset, out line, out column);
 	}
 
 	/// Whether `input` starts with a UTF-8, UTF-16 or UTF-32 byte order mark.
