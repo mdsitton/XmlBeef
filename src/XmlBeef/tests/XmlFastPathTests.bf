@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using XmlBeef;
+using internal XmlBeef;
 using static XmlBeef.XmlTestUtil;
 
 namespace XmlBeef;
@@ -9,6 +10,33 @@ namespace XmlBeef;
 /// must come out of the fast ones too.
 static class XmlFastPathTests
 {
+	/// Names of 4-7 bytes that differ only in their first and last bytes hash apart (the name table's
+	/// hash built them from two overlapping words ORed together: such names collided under every seed).
+	[Test]
+	public static void NameTable_HashUsesEveryByte()
+	{
+		let table = scope XmlNameTable();
+		let seen = scope HashSet<uint32>();
+		let name = scope String();
+		for (int length = 4; length <= 7; length++)
+		{
+			seen.Clear();
+			for (int first < 16)
+			{
+				for (int last < 16)
+				{
+					name.Clear();
+					name.Append((char8)('a' + first));
+					for (int i = 1; i < length - 1; i++)
+						name.Append('m');
+					name.Append((char8)('a' + last));
+					seen.Add(table.[Friend]Hash(name.Ptr, name.Length));
+				}
+			}
+			Test.Assert(seen.Count == 256);
+		}
+	}
+
 	[Test]
 	public static void Text_StopBytesAtEveryOffset()
 	{

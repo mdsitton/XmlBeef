@@ -63,8 +63,6 @@ internal class XmlNameTable
 	XmlTextArena mText ~ delete _;
 	uint64 mSeed;
 
-	static uint64 sSeedCounter = 0x9E3779B97F4A7C15UL;
-
 	/// The names every table holds, at these IDs, through every Clear (the namespace rules need them).
 	public const XmlNameId cXml = .(1);
 	public const XmlNameId cXmlns = .(2);
@@ -82,8 +80,7 @@ internal class XmlNameTable
 		mEntries = new .();
 		mSlots = new uint64[64];
 		mText = new XmlTextArena();
-		sSeedCounter = sSeedCounter &* 6364136223846793005UL &+ 1442695040888963407UL;
-		mSeed = sSeedCounter ^ (uint64)(int)Internal.UnsafeCastToPtr(this);
+		mSeed = ByteHash.NewSeed();
 		mEntries.Add(default);
 		AddPredefined();
 	}
@@ -138,35 +135,14 @@ internal class XmlNameTable
 	/// @brief The bytes the table holds (entries, slots, text), approximately.
 	public int ReservedBytes => mEntries.ReservedBytes +mSlots.Count * sizeof(uint64) + mText.ReservedBytes;
 
-	/// A seeded hash of the bytes, read as whole words (overlapping at the end, never past it).
+	/// A seeded hash of the bytes, read as whole words (overlapping at the end, never past it):
+	/// FormatCore's ByteHash, which started as this one. (This one built 4-7 byte keys from two
+	/// overlapping words ORed together, so names that differed only in their first and last bytes
+	/// collided under every seed.)
 	[Inline]
 	uint32 Hash(char8* ptr, int length)
 	{
-		uint64 h = mSeed ^ ((uint64)length << 56);
-		if (length >= 8)
-		{
-			int i = 0;
-			while (i + 8 < length)
-			{
-				h = Mix(h ^ Swar.Load64(ptr + i));
-				i += 8;
-			}
-			h = Mix(h ^ Swar.Load64(ptr + length - 8));
-		}
-		else if (length >= 4)
-			h = Mix(h ^ (((uint64)Swar.Load32(ptr) << 24) | Swar.Load32(ptr + length - 4)));
-		else if (length > 0)
-			h = Mix(h ^ ((uint64)(uint8)ptr[0] | ((uint64)(uint8)ptr[length >> 1] << 8) | ((uint64)(uint8)ptr[length - 1] << 16)));
-		// The high half of a multiply: every input bit reaches the slot bits
-		h = (h ^ (h >> 32)) &* 0xD6E8FEB86659FD93UL;
-		return (uint32)(h >> 32);
-	}
-
-	[Inline]
-	static uint64 Mix(uint64 x)
-	{
-		uint64 m = x &* 0x9E3779B97F4A7C15UL;
-		return m ^ (m >> 29);
+		return ByteHash.Hash(ptr, length, mSeed);
 	}
 
 	/// Recently interned names, direct-mapped by first byte, last byte and length: documents repeat a
