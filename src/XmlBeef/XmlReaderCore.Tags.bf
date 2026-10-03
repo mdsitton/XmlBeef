@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using FormatCore;
+using internal FormatCore;
 using internal XmlBeef;
 
 namespace XmlBeef;
@@ -89,8 +91,8 @@ extension XmlReaderCore<TCursor>
 			int q = valueStart;
 			while (q + 8 <= mEnd)
 			{
-				uint64 word = XmlChar.Load64(mData + q);
-				if ((XmlChar.BytesEqual(word, (uint8)quote) | XmlChar.BytesEqual(word, (uint8)'<') | XmlChar.BytesEqual(word, (uint8)'&') | XmlChar.BytesBelowSpace(word)) != 0)
+				uint64 word = Swar.Load64(mData + q);
+				if ((Swar.BytesEqual(word, (uint8)quote) | Swar.BytesEqual(word, (uint8)'<') | Swar.BytesEqual(word, (uint8)'&') | Swar.BytesBelowSpace(word)) != 0)
 					break;
 				q += 8;
 			}
@@ -198,8 +200,8 @@ extension XmlReaderCore<TCursor>
 		{
 			while (p + 8 <= mEnd)
 			{
-				uint64 word = XmlChar.Load64(mData + p);
-				if ((XmlChar.BytesEqual(word, (uint8)quote) | XmlChar.BytesEqual(word, (uint8)'<') | XmlChar.BytesEqual(word, (uint8)'&') | XmlChar.BytesBelowSpace(word)) != 0)
+				uint64 word = Swar.Load64(mData + p);
+				if ((Swar.BytesEqual(word, (uint8)quote) | Swar.BytesEqual(word, (uint8)'<') | Swar.BytesEqual(word, (uint8)'&') | Swar.BytesBelowSpace(word)) != 0)
 					break;
 				p += 8;
 			}
@@ -293,7 +295,7 @@ extension XmlReaderCore<TCursor>
 		if (At(pos + 1) == '#')
 		{
 			int end = Try!(ReadCharReference(pos, let cp));
-			XmlChar.EncodeUtf8(buffer, cp);
+			Utf8.Encode(buffer, cp);
 			return end;
 		}
 		int nameEnd = Try!(ScanReferenceName(pos));

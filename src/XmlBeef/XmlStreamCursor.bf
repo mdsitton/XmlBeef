@@ -395,7 +395,7 @@ internal struct XmlBufferedStreamCursor : IXmlCursor
 	{
 		char8* text = (char8*)Buffer - mBase;
 		int from = mBase + mValid;
-		int to = mDone ? mBase + mFilled : XmlChar.CompleteSequencesEnd(text, from, mBase + mFilled);
+		int to = mDone ? mBase + mFilled : FormatCore.Utf8.CompleteSequencesEnd(text, from, mBase + mFilled);
 		if (mState.mHasError)
 			to = Math.Min(to, Math.Max(mState.mErrorOffset, from));
 		let message = scope String();

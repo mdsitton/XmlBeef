@@ -1,1 +1,1 @@
-1:6: UTF-8-encoded surrogate
+1:6: The bytes 0xED 0xA0 encode a surrogate (U+D800-U+DFFF), which is not valid UTF-8

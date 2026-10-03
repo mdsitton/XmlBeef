@@ -1,4 +1,6 @@
 using System;
+using FormatCore;
+using internal FormatCore;
 using internal XmlBeef;
 
 namespace XmlBeef;
@@ -528,7 +530,7 @@ internal struct XmlDecoder
 				{
 					while (k < words)
 					{
-						uint64 word = XmlChar.Load64((char8*)b + i + k * 8);
+						uint64 word = Swar.Load64((char8*)b + i + k * 8);
 						if ((word & 0xFF80FF80FF80FF80UL) != 0)
 							break;
 						*(uint32*)(dst + w + k * 4) = (uint32)(word & 0xFF) | (uint32)((word >> 8) & 0xFF00) | (uint32)((word >> 16) & 0xFF0000) | (uint32)((word >> 24) & 0xFF000000);
@@ -539,7 +541,7 @@ internal struct XmlDecoder
 				{
 					while (k < words)
 					{
-						uint64 word = XmlChar.Load64((char8*)b + i + k * 8);
+						uint64 word = Swar.Load64((char8*)b + i + k * 8);
 						if ((word & 0x80FF80FF80FF80FFUL) != 0)
 							break;
 						*(uint32*)(dst + w + k * 4) = (uint32)((word >> 8) & 0xFF) | (uint32)((word >> 16) & 0xFF00) | (uint32)((word >> 24) & 0xFF0000) | (uint32)((word >> 32) & 0xFF000000);

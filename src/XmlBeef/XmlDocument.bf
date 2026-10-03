@@ -1,6 +1,8 @@
 using System;
 using System.Collections;
 using System.IO;
+using FormatCore;
+using internal FormatCore;
 using internal XmlBeef;
 
 namespace XmlBeef;
@@ -736,11 +738,11 @@ public class XmlDocument
 	{
 		if (mLineStarts.IsEmpty)
 		{
-			int i = XmlChar.StartsWithBom(mSource.Ptr, mSource.Length) ? 3 : 0;
+			int i = Utf8.StartsWithBom(mSource.Ptr, mSource.Length) ? 3 : 0;
 			mLineStarts.Add((int32)i);
 			while (i < mSource.Length)
 			{
-				int newline = XmlChar.NewlineLength(mSource.Ptr, i, mSource.Length);
+				int newline = Utf8.AsciiNewlineLength(mSource.Ptr, i, mSource.Length);
 				if (newline > 0)
 				{
 					i += newline;
@@ -774,7 +776,7 @@ public class XmlDocument
 	/// Whether `input` starts with a UTF-8, UTF-16 or UTF-32 byte order mark.
 	static bool StartsWithAnyBom(StringView input)
 	{
-		if (XmlChar.StartsWithBom(input.Ptr, input.Length))
+		if (Utf8.StartsWithBom(input.Ptr, input.Length))
 			return true;
 		if (input.Length >= 2 && (((uint8)input[0] == 0xFE && (uint8)input[1] == 0xFF) || ((uint8)input[0] == 0xFF && (uint8)input[1] == 0xFE)))
 			return true;

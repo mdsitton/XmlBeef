@@ -1,4 +1,6 @@
 using System;
+using FormatCore;
+using internal FormatCore;
 using internal XmlBeef;
 
 namespace XmlBeef;
@@ -40,110 +42,11 @@ internal interface IXmlCursor
 	bool BomOverridesDeclaration { get; }
 }
 
-/// Counts lines forward through the input, and columns only when asked: newlines are found 8 bytes at
-/// a time up to an offset (AdvanceLines), and a column is the code points from a base on the current
-/// line (its start, or a later offset whose column is known) to the offset (Column). A stream locates
-/// only the elements still open when its buffer moves (XmlReaderCore.ResolvePositions), errors, and the
-/// bytes it drops, so most bytes are only scanned for newlines, once.
-internal struct XmlLineCounter
-{
-	/// Newlines are counted up to here.
-	public int mPos;
-	public int mLine = 1;
-	/// The column base: an offset on the current line (its start, or later) and its column.
-	public int mLineStart;
-	public int mLineColumn = 1;
-
-	public this(int start)
-	{
-		mPos = start;
-		mLineStart = start;
-	}
-
-	/// Moves to `offset` (not before the current position), counting every newline (CRLF as one).
-	/// `text[mPos ..< offset]` must be available, up to `end`.
-	public void AdvanceLines(char8* text, int offset, int end) mut
-	{
-		while (mPos < offset)
-		{
-			// Two words at a time while neither has a byte below 0x0E: validated text has none there but tab,
-			// LF and CR, so no newline (a word with a tab takes the exact path below)
-			while (mPos + 16 <= offset && (XmlChar.BytesBelow0E(XmlChar.Load64(text + mPos)) | XmlChar.BytesBelow0E(XmlChar.Load64(text + mPos + 8))) == 0)
-				mPos += 16;
-			if (mPos >= offset)
-				break;
-			if (mPos + 8 <= end)
-			{
-				// Every newline of the word at once: each LF, and each CR not followed by an LF (in the word,
-				// or the next byte), which then is the newline. A word past `offset` (still in the window)
-				// counts only the bytes before it.
-				int count = Math.Min(offset - mPos, 8);
-				uint64 word = XmlChar.Load64(text + mPos);
-				uint64 lf = XmlChar.BytesEqual(word, (uint8)'\n');
-				uint64 cr = XmlChar.BytesEqual(word, (uint8)'\r');
-				if ((lf | cr) != 0)
-				{
-					uint64 lfNext = lf >> 8;
-					if (mPos + 8 < end && text[mPos + 8] == '\n')
-						lfNext |= 1UL << 63;
-					uint64 newlines = lf | (cr & ~lfNext);
-					if (count < 8)
-						newlines &= (1UL << (count * 8)) - 1;
-					if (newlines != 0)
-					{
-						mLine += XmlChar.CountHighBits(newlines);
-						// The line starts after the last one: smeared down, its byte and those below
-						uint64 below = newlines | (newlines >> 8);
-						below |= below >> 16;
-						below |= below >> 32;
-						mLineStart = mPos + XmlChar.CountHighBits(below);
-						mLineColumn = 1;
-					}
-				}
-				mPos += count;
-				continue;
-			}
-			int newline = XmlChar.NewlineLength(text, mPos, end);
-			// A CRLF across `offset` (an offset on its LF): its CR is not the newline, as in a word above;
-			// the LF is counted from there
-			if (mPos + newline > offset)
-			{
-				mPos = offset;
-				break;
-			}
-			if (newline > 0)
-			{
-				mPos += newline;
-				mLine++;
-				mLineStart = mPos;
-				mLineColumn = 1;
-				continue;
-			}
-			mPos++;
-		}
-	}
-
-	/// The column of `offset`, which must be on the current line, at or after the base, with
-	/// `text[mLineStart ..< offset]` available. The base moves there, so the next column on the line
-	/// counts on from it. (An offset inside a CRLF, before the base, gets the base's column.)
-	public int Column(char8* text, int offset) mut
-	{
-		if (offset > mLineStart)
-		{
-			mLineColumn += XmlChar.CountCodePoints(text, mLineStart, offset);
-			mLineStart = offset;
-		}
-		return mLineColumn;
-	}
-
-	/// AdvanceLines and Column: the line and column of `offset`.
-	public void Locate(char8* text, int offset, int end, out int line, out int column) mut
-	{
-		AdvanceLines(text, offset, end);
-		line = mLine;
-		column = Column(text, offset);
-	}
-}
+/// Counts lines forward through the input, and columns only when asked (FormatCore's LineCounter, which
+/// started as this one): a stream locates only the elements still open when its buffer moves
+/// (XmlReaderCore.ResolvePositions), errors, and the bytes it drops, so most bytes are only scanned
+/// for newlines, once.
+typealias XmlLineCounter = LineCounter<XmlText>;
 
 /// An in-memory input: the window is the whole (transcoded) input, validated up front; Fill never has
 /// more.

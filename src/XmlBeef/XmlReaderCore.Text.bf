@@ -1,4 +1,6 @@
 using System;
+using FormatCore;
+using internal FormatCore;
 using internal XmlBeef;
 
 namespace XmlBeef;
@@ -31,8 +33,8 @@ extension XmlReaderCore<TCursor>
 			// are walked byte by byte. After a stream's refill the words go on from there.
 			while (p + 8 <= mEnd)
 			{
-				uint64 word = XmlChar.Load64(mData + p);
-				if ((XmlChar.BytesEqual(word, (uint8)'<') | XmlChar.BytesEqual(word, (uint8)'&') | XmlChar.BytesEqual(word, (uint8)']') | XmlChar.BytesEqual(word, (uint8)'\r')) != 0)
+				uint64 word = Swar.Load64(mData + p);
+				if ((Swar.BytesEqual(word, (uint8)'<') | Swar.BytesEqual(word, (uint8)'&') | Swar.BytesEqual(word, (uint8)']') | Swar.BytesEqual(word, (uint8)'\r')) != 0)
 					break;
 				p += 8;
 			}
@@ -57,8 +59,8 @@ extension XmlReaderCore<TCursor>
 		{
 			while (p + 8 <= mEnd)
 			{
-				uint64 word = XmlChar.Load64(mData + p);
-				if ((XmlChar.BytesEqual(word, (uint8)a) | XmlChar.BytesEqual(word, (uint8)b)) != 0)
+				uint64 word = Swar.Load64(mData + p);
+				if ((Swar.BytesEqual(word, (uint8)a) | Swar.BytesEqual(word, (uint8)b)) != 0)
 					break;
 				p += 8;
 			}
@@ -150,7 +152,7 @@ extension XmlReaderCore<TCursor>
 			if (At(p + 1) == '#')
 			{
 				p = Try!(ReadCharReference(p, let cp));
-				XmlChar.EncodeUtf8(mTextBuffer, cp);
+				Utf8.Encode(mTextBuffer, cp);
 				runStart = p;
 				continue;
 			}
@@ -269,7 +271,7 @@ extension XmlReaderCore<TCursor>
 			if (c >= '0' && c <= '9')
 				digit = (uint32)(c - '0');
 			else if (hex && ((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
-				digit = XmlChar.HexDigitValue(c);
+				digit = Hex.DigitValue(c);
 			else
 				break;
 			// Saturate: anything beyond U+10FFFF is reported as such, however long
@@ -295,7 +297,7 @@ extension XmlReaderCore<TCursor>
 			if (value > 0x10FFFF)
 				message.Append("a value beyond U+10FFFF");
 			else
-				XmlChar.AppendCodePointName(message, (uint32)value);
+				Hex.AppendCodePointName(message, (uint32)value);
 			message.Append(", which is not a `Char`");
 			return .Err(Fail(.InvalidChar, message, pos, p - pos));
 		}

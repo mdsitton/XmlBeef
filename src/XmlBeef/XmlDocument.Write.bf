@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using FormatCore;
+using internal FormatCore;
 using internal XmlBeef;
 
 namespace XmlBeef;
@@ -346,7 +348,7 @@ extension XmlDocument
 				continue;
 			}
 			// Gone: alone on its line, the line goes with it
-			int newline = (pos < subset.Length) ? XmlChar.NewlineLength(subset.Ptr, pos, subset.Length) : 0;
+			int newline = (pos < subset.Length) ? Utf8.AsciiNewlineLength(subset.Ptr, pos, subset.Length) : 0;
 			int indent = output.Length;
 			while (indent > 0 && (output[indent - 1] == ' ' || output[indent - 1] == '\t'))
 				indent--;
@@ -399,7 +401,7 @@ extension XmlDocument
 				i++;
 				continue;
 			}
-			char32 c = XmlChar.Decode(output.Ptr, i, let length);
+			char32 c = Utf8.Decode(output.Ptr, i, let length);
 			if (XmlEncoder.CanEncode(c, mFixEncoding))
 			{
 				i += length;
@@ -415,7 +417,7 @@ extension XmlDocument
 					if (context == .CData)
 						replacement.Append("]]>");
 					replacement.Append("&#x");
-					XmlChar.AppendHex(replacement, (uint32)c, 1);
+					Hex.Append(replacement, (uint32)c, 1);
 					replacement.Append(';');
 					if (context == .CData)
 						replacement.Append("<![CDATA[");

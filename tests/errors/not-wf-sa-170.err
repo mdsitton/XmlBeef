@@ -1,1 +1,1 @@
-1:6: Code point beyond U+10FFFF
+1:6: The byte 0xF7 is not valid UTF-8 (it never appears in UTF-8)

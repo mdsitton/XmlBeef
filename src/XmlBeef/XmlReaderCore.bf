@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using FormatCore;
+using internal FormatCore;
 using internal XmlBeef;
 
 namespace XmlBeef;
@@ -765,7 +767,7 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 	[Inline]
 	bool StartsWith(int pos, StringView literal)
 	{
-		return AvailN(pos, literal.Length) && XmlChar.EqualBytes(mData + pos, literal.Ptr, literal.Length);
+		return AvailN(pos, literal.Length) && Swar.EqualBytes(mData + pos, literal.Ptr, literal.Length);
 	}
 
 	[Inline]
@@ -804,7 +806,7 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 			return (char32)mData[pos];
 		}
 		AvailN(pos, 4);
-		return XmlChar.Decode(mData, pos, out length);
+		return Utf8.Decode(mData, pos, out length);
 	}
 
 	/// ScanName with the common case inline: an ASCII name that ends inside the window within
@@ -955,7 +957,7 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 			nameMessage.Append('`');
 			nameMessage.Append(View(pos, length));
 			nameMessage.Append("` (");
-			XmlChar.AppendCodePointName(nameMessage, (uint32)cp);
+			Hex.AppendCodePointName(nameMessage, (uint32)cp);
 			nameMessage.Append(") cannot be part of a name");
 			return Fail(.InvalidName, nameMessage, pos, length);
 		}
@@ -966,7 +968,7 @@ internal class XmlReaderCore<TCursor> : XmlReaderCoreBase where TCursor : IXmlCu
 			case ' ': message.Append("a space");
 			case '\t': message.Append("a tab");
 			case '\n', '\r': message.Append("a newline");
-			default: XmlChar.AppendCodePointName(message, (uint32)cp);
+			default: Hex.AppendCodePointName(message, (uint32)cp);
 			}
 		}
 		else

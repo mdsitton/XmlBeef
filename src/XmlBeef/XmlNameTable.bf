@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using FormatCore;
+using internal FormatCore;
 using internal XmlBeef;
 
 namespace XmlBeef;
@@ -146,13 +148,13 @@ internal class XmlNameTable
 			int i = 0;
 			while (i + 8 < length)
 			{
-				h = Mix(h ^ XmlChar.Load64(ptr + i));
+				h = Mix(h ^ Swar.Load64(ptr + i));
 				i += 8;
 			}
-			h = Mix(h ^ XmlChar.Load64(ptr + length - 8));
+			h = Mix(h ^ Swar.Load64(ptr + length - 8));
 		}
 		else if (length >= 4)
-			h = Mix(h ^ (((uint64)XmlChar.Load32(ptr) << 24) | XmlChar.Load32(ptr + length - 4)));
+			h = Mix(h ^ (((uint64)Swar.Load32(ptr) << 24) | Swar.Load32(ptr + length - 4)));
 		else if (length > 0)
 			h = Mix(h ^ ((uint64)(uint8)ptr[0] | ((uint64)(uint8)ptr[length >> 1] << 8) | ((uint64)(uint8)ptr[length - 1] << 16)));
 		// The high half of a multiply: every input bit reaches the slot bits
@@ -184,7 +186,7 @@ internal class XmlNameTable
 		if (id != 0 && id < (uint32)mEntries.Count)
 		{
 			ref Entry entry = ref mEntries[id];
-			if (entry.mLength == length && XmlChar.EqualBytes(entry.mPtr, text.Ptr, length))
+			if (entry.mLength == length && Swar.EqualBytes(entry.mPtr, text.Ptr, length))
 				return .(id);
 		}
 		let interned = Intern(text);
@@ -206,7 +208,7 @@ internal class XmlNameTable
 		if (id != 0 && id < (uint32)mEntries.Count)
 		{
 			ref Entry entry = ref mEntries[id];
-			if (entry.mLength == length && XmlChar.EqualBytes(entry.mPtr, text.Ptr, length))
+			if (entry.mLength == length && Swar.EqualBytes(entry.mPtr, text.Ptr, length))
 				return .(id);
 		}
 		let found = Find(text);
@@ -233,7 +235,7 @@ internal class XmlNameTable
 			{
 				uint32 id = (uint32)entrySlot;
 				ref Entry entry = ref mEntries[id];
-				if (entry.mLength == text.Length && XmlChar.EqualBytes(entry.mPtr, text.Ptr, text.Length))
+				if (entry.mLength == text.Length && Swar.EqualBytes(entry.mPtr, text.Ptr, text.Length))
 					return .(id);
 			}
 			slot = (slot + 1) & mask;
@@ -275,7 +277,7 @@ internal class XmlNameTable
 			{
 				uint32 id = (uint32)entrySlot;
 				ref Entry entry = ref mEntries[id];
-				if (entry.mLength == text.Length && XmlChar.EqualBytes(entry.mPtr, text.Ptr, text.Length))
+				if (entry.mLength == text.Length && Swar.EqualBytes(entry.mPtr, text.Ptr, text.Length))
 					return .(id);
 			}
 			slot = (slot + 1) & mask;
@@ -336,7 +338,7 @@ internal class XmlNameTable
 
 	static bool StartsWithNameStartChar(StringView text)
 	{
-		return XmlChar.IsNameStartChar(XmlChar.Decode(text.Ptr, 0, let length));
+		return XmlChar.IsNameStartChar(Utf8.Decode(text.Ptr, 0, let length));
 	}
 
 	/// @brief The prefix of a qualified name (None when it has no colon). Interned on first use.

@@ -1,6 +1,8 @@
 using System;
 using System.Collections;
 using System.IO;
+using FormatCore;
+using internal FormatCore;
 using internal XmlBeef;
 
 namespace XmlBeef;
@@ -361,7 +363,7 @@ extension XmlDocument
 		int colonAt = -1;
 		while (i < name.Length)
 		{
-			char32 cp = XmlChar.Decode(name.Ptr, i, let length);
+			char32 cp = Utf8.Decode(name.Ptr, i, let length);
 			if (i == 0 ? !XmlChar.IsNameStartChar(cp) : !XmlChar.IsNameChar(cp))
 				return false;
 			if (cp == ':')
@@ -372,7 +374,7 @@ extension XmlDocument
 			i += length;
 		}
 		if (namespaces && colons > 0)
-			return colons == 1 && colonAt > 0 && colonAt < name.Length - 1 && XmlChar.IsNameStartChar(XmlChar.Decode(name.Ptr, colonAt + 1, ?));
+			return colons == 1 && colonAt > 0 && colonAt < name.Length - 1 && XmlChar.IsNameStartChar(Utf8.Decode(name.Ptr, colonAt + 1, ?));
 		return true;
 	}
 
@@ -556,10 +558,10 @@ extension XmlDocument
 			XmlEncoder.Encode(text, .Utf8, output);
 			return .Ok;
 		}
-		char32 cp = XmlChar.Decode(text.Ptr, bad, let length);
+		char32 cp = Utf8.Decode(text.Ptr, bad, let length);
 		let message = scope String();
 		message.Append("The character ");
-		XmlChar.AppendCodePointName(message, (uint32)cp);
+		Hex.AppendCodePointName(message, (uint32)cp);
 		message.AppendF(" cannot be written in the document's encoding ({})", encoding);
 		if (options.Unencodable == .CharacterReference)
 			message.Append(" (where XML has no character reference: a comment, a processing instruction, a name)");

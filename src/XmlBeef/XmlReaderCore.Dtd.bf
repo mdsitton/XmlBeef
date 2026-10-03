@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using FormatCore;
+using internal FormatCore;
 using internal XmlBeef;
 
 namespace XmlBeef;
@@ -248,7 +250,7 @@ extension XmlReaderCore<TCursor>
 				if (At(p + 1) == '#')
 				{
 					p = Try!(ReadCharReference(p, let cp));
-					XmlChar.EncodeUtf8(output, cp);
+					Utf8.Encode(output, cp);
 				}
 				else
 				{
@@ -337,7 +339,7 @@ extension XmlReaderCore<TCursor>
 		while (Avail(p) && mData[p] != quote)
 		{
 			if (!XmlChar.IsPubidChar(mData[p]))
-				return .Err(Fail(.InvalidDeclaration, scope $"A public identifier cannot contain `{View(p, XmlChar.Utf8SequenceLength(mData[p]))}`", p));
+				return .Err(Fail(.InvalidDeclaration, scope $"A public identifier cannot contain `{View(p, Utf8.SequenceLength(mData[p]))}`", p));
 			p++;
 		}
 		if (!Avail(p))

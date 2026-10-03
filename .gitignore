@@ -33,3 +33,4 @@ bench/compare/zig/.zig-cache/
 bench/compare/zig/zig-out/
 bench/compare/c/build/
 bench/compare/beef/build/
+win-test.log

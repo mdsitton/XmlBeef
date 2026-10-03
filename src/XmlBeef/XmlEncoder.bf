@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using FormatCore;
+using internal FormatCore;
 
 namespace XmlBeef;
 
@@ -30,7 +32,7 @@ internal static class XmlEncoder
 				length = 1;
 			}
 			else
-				cp = XmlChar.Decode(text.Ptr, i, out length);
+				cp = Utf8.Decode(text.Ptr, i, out length);
 			uint32 c = (uint32)cp;
 			switch (encoding)
 			{

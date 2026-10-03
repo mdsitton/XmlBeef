@@ -9,3 +9,4 @@ StartupProject = "Fixtures"
 [Projects]
 XmlBeef = {Path = "../.."}
 Fixtures = {Path = "."}
+FormatCore = {Path = "../../../FormatCore-xml"}
