@@ -157,8 +157,7 @@ extension XmlDocument
 			mErrors[i].mMessage = MoveText(mErrors[i].mMessage, store, source);
 		mSource = source;
 		// Nothing views the input copy any more (the source, when kept, is a copy of its own)
-		mInputStart = null;
-		mInputEnd = null;
+		mInput.Clear();
 
 		if (newIds != null)
 		{

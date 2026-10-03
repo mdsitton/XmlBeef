@@ -161,9 +161,9 @@ public class XmlDocument
 	internal List<XmlRangeRecord> mNodeRanges ~ delete _;
 	internal List<XmlRangeRecord> mAttributeRanges ~ delete _;
 	/// The document's copy of the input it was read from: values that are views of it are kept as they
-	/// are, and only decoded text (references, line ends) is copied into the store.
-	char8* mInputStart;
-	char8* mInputEnd;
+	/// are, and only decoded text (references, line ends) is copied into the store (FormatCore's
+	/// KeptSource).
+	KeptSource mInput;
 	/// PreserveStyle (XmlDocument.Style.bf): the source text (UTF-8, as the reader's offsets index it),
 	/// whether the input started with a byte order mark, the landmarks outside the nodes, and the
 	/// nodes' and attributes' source pieces (by ID and index; empty otherwise).
@@ -303,8 +303,7 @@ public class XmlDocument
 		mErrors.Clear();
 		mNamespacesChanged = false;
 		mNamespaces = true;
-		mInputStart = null;
-		mInputEnd = null;
+		mInput.Clear();
 		mPreserve = false;
 		mSource = default;
 		mSourceKept = false;
@@ -352,8 +351,7 @@ public class XmlDocument
 		if (config.MaxInputBytes <= 0 || input.Length <= config.MaxInputBytes)
 		{
 			owned = mStore.NewText(input);
-			mInputStart = owned.Ptr;
-			mInputEnd = owned.Ptr + owned.Length;
+			mInput.Set(owned);
 		}
 		mHasBom = StartsWithAnyBom(input);
 		mReader.Reset(owned, readerConfig, mNames);
@@ -380,9 +378,10 @@ public class XmlDocument
 		{
 			// The document keeps the whole source text anyway: read it all, then as memory input
 			let bytes = scope List<uint8>();
-			if (ReadStreamBytes(stream, config.MaxInputBytes, bytes) case .Err(var error))
+			if (ReadShell.ReadStreamBytes(stream, config.MaxInputBytes, bytes) case .Err(let inputError))
 			{
 				Clear();
+				var error = XmlInput.Error(inputError);
 				error.SetSource(config.SourceName);
 				return .Err(error);
 			}
@@ -468,52 +467,16 @@ public class XmlDocument
 			return Read(file, config);
 		}
 		let bytes = scope List<uint8>();
-		if (ReadFileBytes(path, config.MaxInputBytes, bytes) case .Err(var error))
+		// The whole file within MaxInputBytes (FormatCore's read shell: a larger file fails from its size
+		// before anything is read, one that grows while read stops at the limit)
+		if (ReadShell.ReadFileBytes(path, config.MaxInputBytes, bytes) case .Err(let inputError))
 		{
 			Clear();
+			var error = XmlInput.Error(inputError);
 			error.SetSource(config.SourceName);
 			return .Err(error);
 		}
 		return ReadBytes(bytes, config);
-	}
-
-	/// Reads a whole file into `bytes`, but with a `maxInputBytes` budget never more than that: a larger
-	/// file fails from its size before anything is read, and one that grows while read stops at the
-	/// limit.
-	static Result<void, XmlParseError> ReadFileBytes(StringView path, int maxInputBytes, List<uint8> bytes)
-	{
-		let file = scope FileStream();
-		if (file.Open(path, .Read, .Read) case .Err)
-			return .Err(XmlParseError(.IoError, "Cannot read the file", 0, 0, 0, 0));
-		int64 size = file.Length;
-		if (maxInputBytes > 0 && size > maxInputBytes)
-			return .Err(XmlParseError(.ResourceLimitExceeded, scope $"The input ({size} bytes) exceeds MaxInputBytes ({maxInputBytes})", 1, 1, 0, 0));
-		// The expected size in one read (plus a byte to see the end), then more if the file grew
-		return ReadStreamBytes(file, maxInputBytes, bytes, (int)size + 1);
-	}
-
-	/// Reads a stream to its end into `bytes`, failing past `maxInputBytes` (0: no limit).
-	static Result<void, XmlParseError> ReadStreamBytes(Stream stream, int maxInputBytes, List<uint8> bytes, int firstChunk = 65536)
-	{
-		int chunk = firstChunk;
-		while (true)
-		{
-			int filled = bytes.Count;
-			bytes.Count = filled + chunk;
-			switch (stream.TryRead(.(bytes.Ptr + filled, chunk)))
-			{
-			case .Ok(let read):
-				bytes.Count = filled + Math.Max(read, 0);
-				if (read <= 0)
-					return .Ok;
-				if (maxInputBytes > 0 && bytes.Count > maxInputBytes)
-					return .Err(XmlParseError(.ResourceLimitExceeded, scope $"The input exceeds MaxInputBytes ({maxInputBytes})", 1, 1, 0, 0));
-				chunk = Math.Max(chunk - read, 4096);
-			case .Err:
-				bytes.Count = filled;
-				return .Err(XmlParseError(.IoError, "Cannot read the input", 0, 0, 0, 0));
-			}
-		}
 	}
 
 	/// Turns the reader's events into records.
@@ -727,7 +690,7 @@ public class XmlDocument
 		StringView text = reader.SourceText;
 		if (text.IsEmpty)
 			mSource = default;
-		else if (mInputStart != null && text.Ptr >= mInputStart && text.Ptr + text.Length <= mInputEnd)
+		else if (mInput.Contains(text))
 			mSource = text;
 		else
 			mSource = mStore.NewText(text);
@@ -780,9 +743,7 @@ public class XmlDocument
 	[Inline]
 	StringView Own(StringView text)
 	{
-		if (text.Ptr >= mInputStart && text.Ptr + text.Length <= mInputEnd && mInputStart != null)
-			return text;
-		return mStore.NewText(text);
+		return mInput.Own(text, mStore.Text);
 	}
 
 	// Node table
