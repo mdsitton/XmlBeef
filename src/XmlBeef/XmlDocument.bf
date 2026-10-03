@@ -58,7 +58,7 @@ internal struct XmlSubsetItem
 
 /// A node's slot in the document's node table. Links are node IDs; 0 means none; record 0 is the
 /// document node.
-internal struct XmlNodeRecord
+internal struct XmlNodeRecord : ITreeRecord
 {
 	public XmlNodeKind mKind;
 	public XmlNodeFlags mFlags;
@@ -78,7 +78,37 @@ internal struct XmlNodeRecord
 	public uint32 mLastChild;
 	public uint32 mNextSibling;
 	public uint32 mPrevSibling;
+
+	// The links as FormatCore's Tree sees them (inlined into its algorithms like the fields themselves)
+	public uint32 Parent { [Inline] get => mParent; [Inline] set mut => mParent = value; }
+	public uint32 FirstChild { [Inline] get => mFirstChild; [Inline] set mut => mFirstChild = value; }
+	public uint32 LastChild { [Inline] get => mLastChild; [Inline] set mut => mLastChild = value; }
+	public uint32 Next { [Inline] get => mNextSibling; [Inline] set mut => mNextSibling = value; }
+	public uint32 Prev { [Inline] get => mPrevSibling; [Inline] set mut => mPrevSibling = value; }
+	public int32 ChildCount { [Inline] get => mChildCount; [Inline] set mut => mChildCount = value; }
+
+	[Inline]
+	public void SetLastChildAndCount(uint32 last, int32 count) mut
+	{
+		mLastChild = last;
+		mChildCount = count;
+	}
+
+	public bool IsRemoved
+	{
+		[Inline]
+		get => mFlags.HasFlag(.Removed);
+	}
+
+	[Inline]
+	public void MarkRemoved() mut
+	{
+		mFlags |= .Removed;
+	}
 }
+
+/// The node table's link algorithms (FormatCore's Tree; node 0 is the document node, a real ancestor).
+typealias XmlTree = Tree<XmlNodeRecord, const true>;
 
 [AllowDuplicates]
 internal enum XmlAttributeFlags : uint8
@@ -774,18 +804,9 @@ public class XmlDocument
 	}
 
 	/// Links an unlinked node as the last child of `parent`.
+	[Inline]
 	internal void LinkLastChild(uint32 parent, uint32 child)
 	{
-		ref XmlNodeRecord p = ref mNodes[parent];
-		ref XmlNodeRecord c = ref mNodes[child];
-		c.mParent = parent;
-		c.mNextSibling = 0;
-		c.mPrevSibling = p.mLastChild;
-		if (p.mLastChild != 0)
-			mNodes[p.mLastChild].mNextSibling = child;
-		else
-			p.mFirstChild = child;
-		p.mLastChild = child;
-		p.mChildCount++;
+		XmlTree.LinkLast(mNodes.Ptr, parent, child);
 	}
 }

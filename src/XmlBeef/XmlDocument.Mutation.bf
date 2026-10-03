@@ -16,47 +16,19 @@ extension XmlDocument
 	/// Links an unlinked node before `sibling`, under the sibling's parent.
 	internal void LinkBefore(uint32 sibling, uint32 child)
 	{
-		ref XmlNodeRecord s = ref mNodes[sibling];
-		ref XmlNodeRecord c = ref mNodes[child];
-		ref XmlNodeRecord p = ref mNodes[s.mParent];
-		c.mParent = s.mParent;
-		c.mNextSibling = sibling;
-		c.mPrevSibling = s.mPrevSibling;
-		if (s.mPrevSibling != 0)
-			mNodes[s.mPrevSibling].mNextSibling = child;
-		else
-			p.mFirstChild = child;
-		s.mPrevSibling = child;
-		p.mChildCount++;
+		XmlTree.LinkBefore(mNodes.Ptr, sibling, child);
 	}
 
 	/// Links an unlinked node after `sibling`, under the sibling's parent.
 	internal void LinkAfter(uint32 sibling, uint32 child)
 	{
-		uint32 next = mNodes[sibling].mNextSibling;
-		if (next != 0)
-			LinkBefore(next, child);
-		else
-			LinkLastChild(mNodes[sibling].mParent, child);
+		XmlTree.LinkAfter(mNodes.Ptr, sibling, child);
 	}
 
 	/// Takes a node (and its subtree) out of its parent's children; it stays in the table.
 	internal void Unlink(uint32 id)
 	{
-		ref XmlNodeRecord c = ref mNodes[id];
-		ref XmlNodeRecord p = ref mNodes[c.mParent];
-		if (c.mPrevSibling != 0)
-			mNodes[c.mPrevSibling].mNextSibling = c.mNextSibling;
-		else
-			p.mFirstChild = c.mNextSibling;
-		if (c.mNextSibling != 0)
-			mNodes[c.mNextSibling].mPrevSibling = c.mPrevSibling;
-		else
-			p.mLastChild = c.mPrevSibling;
-		p.mChildCount--;
-		c.mParent = 0;
-		c.mNextSibling = 0;
-		c.mPrevSibling = 0;
+		XmlTree.Unlink(mNodes.Ptr, id);
 	}
 
 	/// Before a node leaves its place: the style marks for the place it leaves.
@@ -179,37 +151,14 @@ extension XmlDocument
 			mDocType = 0;
 			DocTypeRemoved();
 		}
-		// Walk the subtree through the links; the removed node's parent is now 0, so the walk stops on
-		// returning to it
-		uint32 current = id;
-		while (true)
-		{
-			mNodes[current].mFlags |= .Removed;
-			if (mNodes[current].mFirstChild != 0)
-			{
-				current = mNodes[current].mFirstChild;
-				continue;
-			}
-			while (current != id && mNodes[current].mNextSibling == 0)
-				current = mNodes[current].mParent;
-			if (current == id)
-				return;
-			current = mNodes[current].mNextSibling;
-		}
+		// Every node of the subtree, through the links
+		XmlTree.MarkRemovedSubtree(mNodes.Ptr, id);
 	}
 
 	/// Whether `ancestor` is `id` or one of its ancestors.
 	internal bool IsSelfOrAncestor(uint32 ancestor, uint32 id)
 	{
-		uint32 current = id;
-		while (true)
-		{
-			if (current == ancestor)
-				return true;
-			if (current == 0)
-				return false;
-			current = mNodes[current].mParent;
-		}
+		return XmlTree.IsSelfOrAncestor(mNodes.Ptr, ancestor, id);
 	}
 
 	// Namespaces
