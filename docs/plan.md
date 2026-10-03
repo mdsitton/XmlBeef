@@ -4,8 +4,8 @@ XmlBeef is an XML 1.0 (Fifth Edition) + Namespaces parser and writer for the Bee
 language. Its main job is reading data formats from disk — SVG first, then configuration and data
 XML, XHTML, project files, COLLADA, Tiled maps, Office parts — fast, fully checked and with located
 errors, and writing them back, optionally preserving the original formatting. It is the third
-sibling of TomlBeef (`~/development/TomlBeef`, TOML 1.1) and KdlBeef (`~/development/KdlBeef`,
-KDL 2.0) and reuses their design, tooling and, where it fits, their code. KdlBeef is the closer
+sibling of TomlBeef (https://github.com/mdsitton/TomlBeef, TOML 1.1) and KdlBeef
+(https://github.com/mdsitton/KdlBeef, KDL 2.0) and reuses their design, tooling and, where it fits, their code. KdlBeef is the closer
 model: it is a markup tree with a pull reader under the document, just like XML.
 
 This document is the handoff for the session that starts the implementation. It records what exists,
@@ -466,7 +466,7 @@ library is integrated; earlier if convenient). Then, as needed: `ReadSubtree`, n
   one deliberate deviation, `hst-lhs-007` (§9 item 6), is listed there with its reason.
 - The SVG corpora: every file parses; with PreserveStyle every file round-trips byte for byte.
 - `[Test]` units per area from `spec-reference.md` §16 (each line is a test), Debug and Release;
-  LeakSanitizer; Windows via `~/development/beef-proton`.
+  LeakSanitizer; Windows via the Windows BeefBuild under Proton (`win-test.sh`).
 - Security tests: billion laughs, quadratic blowup, deep nesting, huge attributes, external entity
   references (must not be opened), each a located limit error.
 - The benchmark inputs double as large-input tests (checksums must match the reference).
@@ -509,7 +509,7 @@ Decided by the author (2026-09-30):
    | 008: UTF-16 BOM + `encoding='utf-8'` (UTF-16 bytes) | 7: libxml2 (both), lxml, pugixml (both), TurboXml, Xml-Beef | 17: expat, Xerces-C, ElementTree, the JDK's SAX/StAX/DOM, Woodstox, Aalto, the three .NET models, xml-rs, xmltree, xmlquery, zig-xml, BeefXml, Beef-Lang-XML |
    | 009: UTF-16 BOM, then UTF-8 bytes | 2: TurboXml, Xml-Beef (no checks) | everything else |
 7. **Encodings: detection plus table-driven decoders.** Port the author's detector from StrikeCore
-   (`~/development/strikeline/Packages/com.coda-digital.strikecore/Runtime/ChartParser/IO/FeedbackChart/ParsingTools.cs`,
+   (`Runtime/ChartParser/IO/FeedbackChart/ParsingTools.cs` in the StrikeCore package,
    `DetectEncoding`: BOMs for UTF-8/16/32 and UTF-7's rejection, then strict UTF-8, then a
    single-byte fallback) and expand it with XML's rules:
    - Appendix F first: BOMs (UTF-8, UTF-16 LE/BE, UTF-32 LE/BE), then the `<?xm` byte patterns

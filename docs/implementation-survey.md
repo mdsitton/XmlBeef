@@ -2,7 +2,7 @@
 
 This survey covers what four Beef XML libraries and about twenty XML libraries in other languages do, how they do it, and what XmlBeef should take or avoid. The sources were read from shallow clones made on 2026-09-30 (last-commit dates are in the tables). The clones were scratch copies under `/tmp`, not pinned. The pinned copies for benchmarking live in `bench/compare/`. File references are relative to each clone.
 
-The Beef libraries were also built with BeefBuild 0.43.6 and run against a set of tricky inputs. "Speed" figures are the published numbers from the cited sources unless marked as measured here. The KdlBeef and TomlBeef techniques this survey refers to are described in `~/development/KdlBeef/docs/architecture.md` and `~/development/TomlBeef/docs/architecture.md`.
+The Beef libraries were also built with BeefBuild 0.43.6 and run against a set of tricky inputs. "Speed" figures are the published numbers from the cited sources unless marked as measured here. The KdlBeef and TomlBeef techniques this survey refers to are described in KdlBeef's and TomlBeef's `docs/architecture.md` (https://github.com/mdsitton/KdlBeef, https://github.com/mdsitton/TomlBeef).
 
 ## At a glance
 

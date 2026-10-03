@@ -23,7 +23,7 @@ Code conventions and Beef gotchas are in `AGENTS.md`.
 
 ### FormatCore
 
-Since 2026-10-03 XmlBeef is built on FormatCore (`~/development/FormatCore`, the shared core of
+Since 2026-10-03 XmlBeef is built on FormatCore (https://github.com/mdsitton/FormatCore, the shared core of
 TomlBeef, KdlBeef, XmlBeef and JsonBeef; its `docs/architecture.md` has the designs, its
 `docs/migration.md` §9 what moved here). XmlBeef keeps its grammar, reader core, error kinds and
 messages, document, writers, recovery and typed-mapping roles; from FormatCore it takes: SWAR, UTF-8
