@@ -10,8 +10,9 @@
 #      samples have passed ("capped"). Report the median sample.
 #   3. Repeat: run each cell in fresh processes, since memory layout, hash seeds, CPU clocks and the
 #      machine's load differ between them, until the runs settle (measure.sh: at least REPEATS = 3,
-#      then on until 3 lie within ±TOLERANCE = 5% of their median, at most MAX_REPEATS = 9), and take
-#      the median. A cell that never settled is marked `~`.
+#      then on until 3 lie within ±TOLERANCE = 10% of their median, at most MAX_REPEATS = 9), and take
+#      the median. A cell that never settled is marked `~`. (measure.sh is FormatCore's bench-kit,
+#      vendored; until 2026-10-03 XmlBeef's own used ±5%.)
 # One operation parses the input once: a file, or for svg-icons and svg-artwork every file of the
 # directory (all read into memory first). Every harness first prints "check: E A V T" (elements;
 # attributes without namespace declarations; attribute value and text lengths in code points after

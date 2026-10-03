@@ -1,15 +1,24 @@
 #!/bin/bash
-# The [XmlObject] generator's build-time checks: every fixture of tests/codegen/src/Fixtures.bf is built
-# alone (beefbuild -define=FIXTURE_<name>) and must fail with the text its `// FIXTURE <name>: <text>`
-# line gives, or build when the text is OK. (A [Test] cannot observe a build that stops.)
+# Vendored from FormatCore tools/test-codegen.sh by tools/sync.sh: edit it there, then sync.
+# A typed-mapping generator's build-time checks (XmlBeef's test-codegen.sh, generalized): every fixture
+# of the fixtures file is built alone (beefbuild -define=FIXTURE_<name>) and must fail with the text its
+# `// FIXTURE <name>: <text>` line gives, or build when the text is OK. (A [Test] cannot observe a build
+# that stops.)
 # Usage: ./test-codegen.sh [fixture names...]
+#   CODEGEN_WS        the fixture workspace (default: tests/codegen)
+#   CODEGEN_FIXTURES  the fixtures file (default: $CODEGEN_WS/src/Fixtures.bf)
 set -uo pipefail
 cd "$(dirname "$0")"
-WS=tests/codegen
+WS="${CODEGEN_WS:-tests/codegen}"
+FIXTURES="${CODEGEN_FIXTURES:-$WS/src/Fixtures.bf}"
 LOG=test-codegen.log
 : > "$LOG"
+if [ ! -f "$FIXTURES" ]; then
+	echo "ERROR: $FIXTURES not found"
+	exit 1
+fi
 
-mapfile -t lines < <(grep -E '^// FIXTURE [A-Za-z0-9]+: ' "$WS/src/Fixtures.bf")
+mapfile -t lines < <(grep -E '^// FIXTURE [A-Za-z0-9]+: ' "$FIXTURES")
 pass=0
 failures=()
 for line in "${lines[@]}"; do
