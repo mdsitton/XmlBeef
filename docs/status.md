@@ -1,23 +1,24 @@
 # XmlBeef status
 
-Last reviewed: 2026-10-01 (after the code review's fixes).
+Last reviewed: 2026-10-03 (after the migration onto FormatCore).
 
 ## Verification baseline
 
 | Check | Expected result |
 |-------|-----------------|
-| `beefbuild -test` (Debug checks) | 256/256 pass |
-| `beefbuild -test -config=TestRelease` (Release settings) | 256/256 pass |
+| `beefbuild -test` (Debug checks) | 257/257 pass |
+| `beefbuild -test -config=TestRelease` (Release settings) | 257/257 pass |
 | `./test-xml-conformance.sh` (Debug `XmlTester`; run `beefbuild` first) | In each of the document, events, rewrite, stream, stream-events, collect and stream-collect modes (the stream modes through a 16-byte buffer; the collect modes with CollectErrors): 957/957 valid and invalid cases accepted, 950/951 not-wf cases rejected, each with its golden message (`tests/errors/<ID>.err`) (the one is `hst-lhs-007`, listed in `tests/xmlconf/expected-failures.txt`: `plan.md` §9 item 6), 262/262 canonical outputs byte for byte; in rewrite mode every accepted case's suite form also survives the canonical writer. 59 of the 66 not-wf cases with unread external entities accepted (tolerated); 27 error cases logged; 274 XML 1.1 and 310 other-edition cases skipped; the 9 NAMESPACE="no" cases run with `-no-ns` |
 | `BIN=./build/Release_Linux64/XmlTester/XmlTester ./test-xml-conformance.sh` (run `beefbuild -config=Release` first) | Same as Debug |
 | `./test-svg-corpus.sh` (and with the Release `BIN`) | 2390/2390 SVGs (W3C SVG 1.1 suite and resvg): read as a document, same suite form from events and from a stream with a 16-byte buffer, kept by the canonical writer, which is a fixed point |
 | `./test-roundtrip.sh` (and with the Release `BIN`) | 3347 inputs (the 957 accepted suite cases and the 2390 corpus SVGs): written back byte for byte with PreserveStyle (`XmlTester -roundtrip`, in the document's encoding) from memory and through a 16-byte stream; random edits (`XmlTester -mutate`, 3 seeds of 8 edits each: 10041 runs) all read back into the edited document, compared in the suite form (defaulted attributes included). The edits include the DOCTYPE's processing instructions and its removal, and CRs in CDATA. Run with `SEEDS=10` (33470 runs) after the review's fixes (2026-10-01) |
 | `./test-collect.sh` (and with the Release `BIN`) | Every suite case of the selection and every corpus SVG, mutated 10 times per seed for 2 seeds (8782 runs), read with CollectErrors from memory and through a 16-byte stream: no crash, no hang, the same errors and document both ways. Run with `SEEDS=5 ROUNDS=20` (21955 runs) at the end of the collect-errors work |
 | `./test-leaks.sh` | No leaks (LeakSanitizer over the TestRelease `[Test]`s) |
-| `./test-codegen.sh` | 19/19 `[XmlObject]` fixtures (`tests/codegen/src/Fixtures.bf`), each built alone: 17 mappings the generator must reject stop the build with their message (roles, collisions by name, alias, inheritance and overlapping namespaces, invalid names, catch-alls, dictionaries, converters), 2 positive controls build |
-| `beefbuild-win -test`, `beefbuild-win -test -config=TestRelease` (`~/development/beef-proton`) | 256/256 pass |
+| `./test-codegen.sh` | 21/21 `[XmlObject]` fixtures (`tests/codegen/src/Fixtures.bf`), each built alone: 17 mappings the generator must reject stop the build with their message (roles, collisions by name, alias, inheritance and overlapping namespaces, invalid names, catch-alls, dictionaries, converters), 4 positive controls build, among them `OkRegisteredConverter` (a converter in the fixture project while a second project, `Other`, also depends on XmlBeef: the bug-1 regression) and `OkSelfReference` |
+| `bash ./win-test.sh` (Test and TestRelease under `~/development/beef-proton`) | 257/257 pass in both |
+| `bash ../FormatCore/tools/sync.sh . --check` | PASS: the vendored scripts, bench-kit and the AGENTS.md region match FormatCore's |
 | `tests/fetch-suites.sh` | W3C XML Conformance Test Suite 20130923 (2,585 cases), W3C SVG 1.1 Second Edition suite (606 SVGs), resvg test SVGs (1,784), each verified by SHA-256 or commit |
-| `bench/compare/run.sh` (XmlBeef's columns: `beefbuild -config=Release` first) | The existing implementations and `XmlBeef` / `XmlBeef reader`, whose check lines match libxml2's on all eight inputs; results in `bench/compare/results.md` (2026-10-02, load 7–12; each cell rerun in fresh processes until 3 agree within 5%, `bench/compare/measure.sh`; 3 of 304 cells did not, marked `~`) and `docs/benchmark.svg`: the document 1.65–2.7× roxmltree, the reader 1.4–2.7× quick-xml and the fastest reader on every input; the targets (`plan.md` §2.2) are met |
+| `bench/compare/run.sh` (XmlBeef's columns: `beefbuild -config=Release` first) | The existing implementations and `XmlBeef` / `XmlBeef reader`, whose check lines match libxml2's on all eight inputs; results in `bench/compare/results.md` (2026-10-02, load 7–12; each cell rerun in fresh processes until 3 agree within 5%, `bench/compare/measure.sh`; 3 of 304 cells did not, marked `~`; since 2026-10-03 measure.sh is FormatCore's bench-kit, ±10%) and `docs/benchmark.svg`: the document 1.65–2.7× roxmltree, the reader 1.4–2.7× quick-xml and the fastest reader on every input; the targets (`plan.md` §2.2) are met |
 | `bench/compare/run-typed.sh` (`./build.sh rust go cs`, `beefbuild -config=Release`) | XmlBeef `[XmlObject]`, quick-xml + serde, Go encoding/xml Unmarshal and .NET XmlSerializer read `osm.xml` into the same model; all four check lines equal the ElementTree reference. `bench/compare/typed-results.md` (2026-10-02, load 13 falling to 10, every cell settled): XmlBeef 139.7 MB/s, quick-xml + serde 90.4, XmlSerializer 69.0, encoding/xml 23.2 |
 | `bench/instructions.sh` (after `beefbuild -config=Release`) | The instruction counts below |
 
@@ -37,18 +38,30 @@ review's P02 (2026-10-01, after its R fixes) and now; the stream rows read the s
 | Event pass, phase 3 | 16.1 | 9.4 | 8.7 | 24.6 | 16.1 | 30.5 | 25.9 | 10.8 |
 | Event pass, phase 5 | 16.3 | 9.1 | 8.6 | 25.5 | 16.3 | 30.4 | 26.3 | 11.3 |
 | Event pass, before P02 | 16.4 | 9.1 | 8.6 | 25.9 | 16.8 | 30.6 | 26.8 | 11.6 |
-| Event pass (now) | 15.8 | 9.0 | 8.0 | 25.7 | 16.3 | 30.3 | 26.4 | 11.3 |
+| Event pass, before FormatCore (d1ee13e) | 15.8 | 9.0 | 8.0 | 25.7 | 16.3 | 30.3 | 26.4 | 11.3 |
+| Event pass (now, on FormatCore) | 15.7 | 8.9 | 8.0 | 25.6 | 16.3 | 30.1 | 26.2 | 11.3 |
 | Document read, phase 2 | 32.3 | 18.0 | 17.3 | 45.8 | 26.1 | 53.9 | 43.5 | 44.9 |
 | Document read, phase 3 | 18.3 | 10.0 | 9.2 | 30.9 | 18.6 | 36.1 | 30.8 | 12.4 |
 | Document read, phase 5 | 18.4 | 9.6 | 9.1 | 31.5 | 18.8 | 35.0 | 30.9 | 12.9 |
 | Document read, before P02 | 18.6 | 9.7 | 9.1 | 32.0 | 19.3 | 35.4 | 31.4 | 13.1 |
-| Document read (now) | 18.0 | 9.5 | 8.5 | 31.7 | 18.8 | 35.0 | 31.0 | 12.9 |
+| Document read, before FormatCore | 18.0 | 9.5 | 8.5 | 31.7 | 18.8 | 35.0 | 31.0 | 12.9 |
+| Document read (now) | 17.7 | 9.4 | 8.4 | 31.4 | 18.7 | 34.6 | 30.7 | 12.8 |
 | Stream events, before P02 | 31.6 | 45.4 | 43.0 | 64.9 | 54.1 | 67.1 | 64.5 | 30.4 |
 | Stream events, after P02 | 22.5 | 13.1 | 11.8 | 35.7 | 22.8 | 37.1 | 34.6 | 14.6 |
 | Stream events, after SP1 | 19.0 | 10.9 | 9.2 | 32.6 | 19.4 | 33.8 | 31.3 | 12.9 |
-| Stream events (now) | 19.3 | 11.3 | 9.3 | 33.2 | 19.4 | 36.0 | 32.0 | 12.9 |
+| Stream events, before FormatCore | 19.3 | 11.3 | 9.3 | 33.2 | 19.4 | 36.0 | 32.0 | 12.9 |
+| Stream events (now) | 18.8 | 10.9 | 8.9 | 32.8 | 19.2 | 35.1 | 31.5 | 12.8 |
 | Stream events, 4 KiB buffer, before P02 | 34.3 | 44.2 | 42.1 | 65.0 | 54.2 | 66.8 | 64.6 | 30.5 |
-| Stream events, 4 KiB buffer (now) | 19.6 | 11.4 | 9.4 | 33.7 | 19.9 | 36.4 | 32.4 | 13.2 |
+| Stream events, 4 KiB buffer, before FormatCore | 19.6 | 11.4 | 9.4 | 33.7 | 19.9 | 36.4 | 32.4 | 13.2 |
+| Stream events, 4 KiB buffer (now) | 19.2 | 11.0 | 9.2 | 33.2 | 19.7 | 35.5 | 31.9 | 13.2 |
+
+The migration onto FormatCore (2026-10-03, d1ee13e → now) left every cell equal or lower: the
+largest gains are the streams (FormatCore's GrowList, TextArena and line index: 1.4-3.4%) and the
+typed read (`XmlTester -bench-loop typed` on osm: 76.90 → 74.75, DecimalParse's fast path). Three
+regressions found on the way were fixed in FormatCore rather than accepted: the validator's 32-byte
+step (a policy hook, `ITextPolicy.IsPlainBlock`, +3% on SVG event passes without it), `Utf8.Encode`'s
+shape for character references (+0.3% on book), and the transcoding cursors' out-of-line constructors
+(+0.8-1.3% on svg-icons, thousands of small documents).
 
 The stream's cost had been mostly line counting (a column per code point, byte by byte, for every
 start tag's position, and again for the bytes a refill drops). P02 counted 8 bytes at a time and once
@@ -90,6 +103,7 @@ and the document ahead of roxmltree on every input.
 | Typed mapping (`[XmlObject]`, `XmlSerializer`) | Done (phase 6): attributes, element text, own text, token-list attributes, repeated and wrapped lists of scalars and objects, child objects, `[XmlChildren]` dispatch, dictionaries in five shapes (`[XmlMap]`), namespaces, naming policies, aliases, required, strict types, converters, allocators, in-place writes that keep a PreserveStyle document. See `architecture.md` §6 |
 | Collect-errors (`XmlReadConfig.CollectErrors`) | Done (phase 7): every error reported and the read goes on; the document keeps what it read and lists the errors (`Errors`). See `architecture.md` §3 |
 | `ReadSubtree`, streaming writer, resolver | Planned "as needed": `plan.md` §6 phase 7 |
+| FormatCore (the shared core of the four format libraries) | Migrated 2026-10-03 (`architecture.md` §1 "FormatCore"): text policy (`XmlText`), UTF-8/SWAR/hex and the validator, `XmlParseError`/`XmlDiagnostic`, the encodings and transcoding cursors (`XmlDetector` keeps XML's declaration rules), `XmlStack`/`XmlTextArena`/line index, the name table's hash (fixes 4-7 byte name collisions), typed doubles, the read shell and kept source, tree links, side tables and change marks, the `[XmlObject]` generator on FormatCore's mapping driver (fixes the converter lookup with a second dependent project, and uint64's integer bounds), the vendored scripts and bench-kit |
 
 ## Open items
 
@@ -104,4 +118,5 @@ remains of them is below (RV-); the follow-up SP1 (no per-start-tag position wor
 |----|------|------|
 | P7 | Phase 7's extras, as needed: `ReadSubtree`, the streaming writer, the external-entity resolver (`plan.md` §6) | M |
 | RV-L | Known limits kept: a CR in a comment or PI data reads back as LF (no escape exists); removing a specified attribute that has a DTD default lets the default return on reading; references to unread entities stay as written after the DOCTYPE is removed (`architecture.md` §4 "Edit dependencies") | S |
+| FC | FormatCore components not adopted, with reasons: `ErrorPolicy` (XML's recovery progress rule compares resume points, and its MaxErrors test counts the coming error: invariants `test-collect.sh` guards), `RangeTable` (its ranges carry a capacity `XmlNodeRecord` has no field for: a layout change to the hot node table), `InternTable` (the name table's entries carry XML state, QName splits and predefined namespace names, on the start-tag fast path; its hash and seed are FormatCore's), the shared `Planner` (the generator keeps its role planning, as KdlBeef's does). Revisit each with instruction counts | M |
 | RV-A1 | Review A01 beyond the frame window: typed document offsets versus window offsets (today both are `int`, converted by `DocOffset`/`DocEnd`) would be a wide change to the core for a small gain; not done | S |

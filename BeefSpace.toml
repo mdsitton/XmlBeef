@@ -7,7 +7,7 @@ StartupProject = "XmlTester"
 XmlBeef = {Path = "."}
 XmlTester = {Path = "XmlTester"}
 # The local FormatCore checkout, overriding the library's Git dependency (same project name)
-FormatCore = {Path = "../FormatCore-xml"}
+FormatCore = {Path = "../FormatCore"}
 
 # Runs the [Test] methods with Release settings (O2, CRT allocator, no runtime checks):
 #   beefbuild -test -config=TestRelease
